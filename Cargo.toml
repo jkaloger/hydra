@@ -5,11 +5,14 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
-clap = "4.6.4"
+clap = { version = "4.6.4", features = ["derive"] }
 fs4 = "1.1.0"
-jiff = "0.2.35"
-serde = "1.0.229"
+jiff = { version = "0.2.35", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+# No `preserve_order`: serde_json's Map is a BTreeMap by default, and that is
+# what gives us the sorted keys of SPEC §3. `preserve_order` swaps in IndexMap
+# and the stable-diff property goes with it.
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 thiserror = "2.0.19"
-ulid = "3.0.0"
+ulid = { version = "3.0.0", features = ["serde"] }
