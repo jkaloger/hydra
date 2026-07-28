@@ -15,10 +15,8 @@ src/
 ├── graph.rs          mutations + invariants (§4)
 ├── query.rs          derived state, pre-order, ready/next/resume (§5, §7)
 ├── render.rs         ASCII tree (§5)
-├── hook.rs           Claude Code hook payloads + gating (§6, §9)
-├── grill.rs          session lease (§6)
 └── main.rs           clap surface (§5)
-hydra-plugin/         the §6 plugin: manifest, skill, hooks.json
+hydra-plugin/         the §6 plugin: manifest and skill
 scripts/smoke.sh      the CLI's only coverage (§8 excludes it from unit tests)
 README.md
 ```
@@ -51,15 +49,9 @@ clap derive over §5. JSON on stdout for everything but `tree`. `--answer -` rea
 
 Not unit tested (§8). Verified by a manual smoke script over the full verb surface.
 
-### I5 — session and hooks
+### I5 — plugin
 
-`grill start`/`stop` writing `.hydra/grill` (§6 shape), gitignored. `hydra hook <event>` for `session-start`, `post-tool-use`, `stop`: parse payload on stdin, gate per the §6 table, emit the `hookSpecificOutput` envelope.
-
-Tests: lease match/mismatch/absent for each event, `session-start` source split (`startup|resume` one-liner vs `compact|clear` full resume), `post-tool-use` command-string gate, `stop` blocks only under a live lease, unparseable payload no-ops rather than dying.
-
-### I6 — plugin
-
-`hydra-plugin/` with `.claude-plugin/plugin.json`, `skills/hydra/SKILL.md` (interview protocol per §6, `grill start` first, degrades if `command -v hydra` fails), `hooks/hooks.json` shelling to `hydra hook <event>`. Zero scripts.
+`hydra-plugin/` with `.claude-plugin/plugin.json` and `skills/hydra/SKILL.md` (interview protocol per §6, degrades if `command -v hydra` fails). Data files only: no hooks, no scripts.
 
 ## Out of scope
 

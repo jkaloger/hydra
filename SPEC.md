@@ -16,7 +16,7 @@ Three artifacts, deliberately separable:
 | ---------------- | --------------------------------------- | ------------------------ |
 | `hydra` core lib | Rust. Graph model, invariants, storage. | Nothing external         |
 | `hydra` CLI      | Thin clap wrapper. JSON on stdout.      | Core lib                 |
-| hydra plugin     | Claude Code plugin: skill + hooks.      | The CLI, by shelling out |
+| hydra plugin     | Claude Code plugin: one skill.          | The CLI, by shelling out |
 
 The CLI is a unix tool. No lazyspec coupling, no export templates, no harness assumptions. The plugin is an adapter and is optional — hydra works from a shell, from a Makefile, from any agent. An MCP shim over the core lib stays possible later; nothing here forecloses it.
 
@@ -108,7 +108,6 @@ One JSON file per tree, repo-local, git-tracked.
 ```
 .hydra/
 ├── HEAD               active tree slug
-├── grill              session lease (see §6), gitignored
 └── <slug>.json
 ```
 
@@ -171,7 +170,7 @@ Rejected at write:
 8. Duplicate or malformed slug.
 9. An edge — `blocked_by` or `parent` — that would create a cycle in the cascade relation.
 
-9 is subtler than 3 and was found the hard way. The cascade walks `children ∪ blocked_by` as one relation (§2), so gating an ancestor on its own descendant closes a cycle across the union even though `blocked_by` alone stays acyclic: re-answering either head reopens the other, forever. `status` never leaves nonzero, `next` never returns null, and the `Stop` hook (§6) keeps refusing to end the turn. A tree that can never reach done is the silent durable corruption this section exists to refuse.
+9 is subtler than 3 and was found the hard way. The cascade walks `children ∪ blocked_by` as one relation (§2), so gating an ancestor on its own descendant closes a cycle across the union even though `blocked_by` alone stays acyclic: re-answering either head reopens the other, forever. `status` never leaves nonzero and `next` never returns null. A tree that can never reach done is the silent durable corruption this section exists to refuse.
 
 Only one direction is a cycle. A `blocked_by` edge contributes `blocker → dependent`, the reverse of the dependency arrow, while a parent pointer contributes `parent → child`. So gating a head on its *ancestor* pushes staleness downward exactly as the tree does and stays legal — §3's own file shape does it. Gating on a descendant closes the loop. `reparent` reaches the same shape with no `blocked_by` write at all, by adopting a head that already blocks the new parent, so it is checked there too; §4.4 doesn't catch that, since the new parent needn't be a descendant. `sprout` needs no check: every cascade edge touching a brand-new head points inward, and a head that didn't exist a moment ago has neither children nor dependents.
 
@@ -223,14 +222,6 @@ hydra tree                               ASCII render
 
 `next` is documented as _first ready head in pre-order_ — document order, not priority. Hydra says what **can** be asked, never what **should**. Pre-order is deterministic, so whoever resumes walks the tree the same way.
 
-### Session
-
-```
-hydra grill start                        take the session lease
-hydra grill stop                         release it
-hydra hook <event>                       read hook JSON on stdin, emit hook JSON on stdout (§9)
-```
-
 ### `hydra tree`
 
 Compact enough to print every turn. Marks the current head.
@@ -258,9 +249,10 @@ Distributed as a Claude Code plugin. Not a `hydra skills install` subcommand —
 ```
 hydra-plugin/
 ├── .claude-plugin/plugin.json
-├── skills/hydra/SKILL.md
-└── hooks/hooks.json
+└── skills/hydra/SKILL.md
 ```
+
+One skill and nothing else. No hooks: a plugin's hooks fire in every project it is installed in, and buying enforcement at that price is a bad trade — the failure modes land in sessions that never asked for hydra, and the enforcement they buy is a turn the model cannot end, which reads as the tool being broken.
 
 The plugin declares the `hydra` binary as a prerequisite. The skill checks `command -v hydra` and degrades to in-context interviewing if it's absent rather than dying.
 
@@ -277,48 +269,15 @@ sprout            new heads the answer opened
 cauterise         heads the answer killed
 ```
 
-The skill also runs `hydra grill start` as its first act.
+### Relentlessness
 
-### Hooks
+Hydra is relentless in the *store*, not in the runtime. There is nothing to seize a stop decision or to inject a reload; the pressure is that the state outlives the context.
 
-Plugin hooks fire in every project once installed, so gating is load-bearing, not polish.
+- An open head cannot be skipped: it blocks `done`, and `hydra status` exits 4 while any remain (§5).
+- Losing the thread costs one command. `hydra resume` (§7) rebuilds the interview from disk, so a compaction, a `/clear` or a new session next week all recover the same way.
+- The skill's discipline covers the rest: re-orient with `resume` on waking, and don't wrap up on a tree that is not done.
 
-Each entry in `hooks.json` shells to `hydra hook <event>` — no scripts, no `jq`, gating logic in tested Rust. See §9.
-
-| Event          | Matcher           | Gate                             | Behaviour                                                            |
-| -------------- | ----------------- | -------------------------------- | -------------------------------------------------------------------- |
-| `SessionStart` | `startup\|resume` | HEAD tree has open heads         | one line: `hydra: 6 open heads on 'hydra-design' — /hydra:hydra to resume` |
-| `SessionStart` | `compact\|clear`  | grill lease matches `session_id` | full `hydra resume` into `additionalContext`                         |
-| `PostToolUse`  | `Bash`            | command contains `hydra `        | `systemMessage` renders `hydra tree` to the user                     |
-| `Stop`         | —                 | grill lease matches `session_id` | `decision: "block"` + inject `hydra next`                            |
-
-The `compact` gate matters most. Context death by compaction is far more common than actual session death, and that hook is what makes hydra reload itself without the model needing to realise it forgot.
-
-The `clear` half of that row is dead as written, and the lease is why: `/clear` starts a new session with a new `session_id`, so a lease taken before it can never match afterwards. `source: "clear"` also misses the `startup|resume` matcher, so hydra says nothing at all across a `/clear`. Compaction keeps the same session, so the load-bearing half works. Recovery is the skill's: re-run `hydra grill start` when it wakes, which re-leases under the new id.
-
-`PostToolUse` self-gates on the command string — only a grilling session runs `hydra cut` — so it needs no lease.
-
-### The lease
-
-`hydra grill start` writes `.hydra/grill`:
-
-```json
-{ "session_id": "abc123", "tree": "hydra-design", "started_at": "..." }
-```
-
-Every hook receives `session_id` on stdin and no-ops unless it matches. That makes the marker a **lease rather than a flag**: a file left behind by a crashed session can never match a new `session_id`, so stale state is inert. No cleanup logic, no crash recovery.
-
-Gitignored — it's session state, not a decision.
-
-### Stop enforcement
-
-The `Stop` hook is what makes hydra _relentless_ in the runtime rather than in a prompt. The model cannot drift into summarising or wrapping up while heads are open.
-
-It seizes the stop decision, so:
-
-- At most one block per turn.
-- Kill switch is `hydra grill stop`.
-- Only fires inside a live lease. A session doing unrelated work in the same repo is never grilled.
+A model that drifts into summarising mid-interview loses nothing but the turn. That is the trade against a runtime that could not drift and could not be got out of either.
 
 ---
 
@@ -377,23 +336,7 @@ Std `#[test]` only, per §8. No `insta`, no `proptest`, no `assert_cmd` — thos
 - **`uuid`** — `ulid` covers identity and sorts lexicographically by time.
 - **`petgraph`** — the graph is a `HashMap<Slug, Head>` with parent pointers. Cycle detection and transitive closure over a few hundred nodes are short hand-written walks; a graph library would cost an index to keep in sync with the JSON, which is exactly the desync §3 avoids.
 - **`indexmap`** — see the `serde_json` note.
-- **`jq`** — see below.
-
-### `hydra hook <event>`
-
-The hook scripts in §6 need to read hook JSON from stdin, extract `session_id`, compare it against the lease, and emit hook JSON on stdout. Written as shell that means a hard dependency on `jq` and a pile of untested bash inside the plugin.
-
-Instead the plugin's `hooks.json` shells straight to the binary:
-
-```
-hydra hook session-start
-hydra hook post-tool-use
-hydra hook stop
-```
-
-Hydra parses the hook payload on stdin and writes the `hookSpecificOutput` envelope on stdout. Gating logic lives in Rust, under the same unit tests as everything else, and the plugin ships zero scripts. No `jq`, no bash.
-
-This keeps the core CLI harness-agnostic in the sense that matters — `hook` is one more subcommand that happens to speak Claude Code's JSON, not a coupling of the model or storage layers.
+- **`jq`** — nothing hydra ships parses JSON in shell. The plugin is data files (§6) and the smoke script is a developer tool, so `jq` is a test-time convenience, never a runtime dependency.
 
 ### Concurrency
 

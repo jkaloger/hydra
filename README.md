@@ -27,12 +27,10 @@ For a persistent install, add a marketplace that lists `hydra-plugin/` and
 `/plugin install hydra@<marketplace>`; `claude plugin validate ./hydra-plugin`
 checks the manifest.
 
-It ships one skill — **`/hydra:hydra`**, the interview protocol; Claude Code
-addresses a plugin's skills `plugin:skill` and does not collapse the case where
-both names match — and three hooks, all of which shell to the `hydra` binary.
-Install that first: the hooks are guarded so a plugin without it stays silent
-rather than reporting `command not found` in every project, and the skill falls
-back to interviewing in context.
+It ships one skill and nothing else — **`/hydra:hydra`**, the interview protocol;
+Claude Code addresses a plugin's skills `plugin:skill` and does not collapse the
+case where both names match. It shells to the `hydra` binary, so install that
+first; without it the skill says so and falls back to interviewing in context.
 
 ## Example
 
@@ -66,13 +64,10 @@ hydra status                                   # exit 0: done. 4 while heads rem
 | 4 | `status` only: open heads remain |
 | 5 | tree addressing: no `.hydra/`, no `HEAD`, no such tree, or one that exists |
 
-`hydra hook` is exempt and always exits 0 — Claude Code reads a hook's exit code
-as part of its own protocol.
-
 ## Development
 
 ```sh
-cargo test              # core lib: graph, invariants, cascade, hooks
+cargo test              # core lib: graph, invariants, cascade
 cargo clippy --all-targets
-scripts/smoke.sh        # the CLI's output shapes and the plugin's wiring
+scripts/smoke.sh        # the CLI's output shapes and the plugin's files
 ```

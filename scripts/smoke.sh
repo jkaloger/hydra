@@ -6,9 +6,8 @@
 # exit codes against the table in `hydra --help`.
 #
 # Adversarial on purpose: every §4 rejection reachable from the CLI, the three
-# `--force` overrides, the `-` stdin path and its misuse, the nonzero `status`,
-# and — for the §6 verbs — every gate a hook has to refuse as well as the ones it
-# fires on. Prints each command it runs and stops at the first surprise.
+# `--force` overrides, the `-` stdin path and its misuse, and the nonzero
+# `status`. Prints each command it runs and stops at the first surprise.
 #
 #   scripts/smoke.sh
 
@@ -77,19 +76,6 @@ stdout_empty() {
   [ ! -s "$OUT" ] || fail "stdout must stay clean when '$STEP' is refused"
 }
 
-# The contract every `hydra hook` invocation owes Claude Code, whatever it was
-# handed: exit 0 (checked by the `run 0` that precedes this), one JSON object on
-# stdout, and not a word on stderr. A hook that breaks any of the three breaks
-# unrelated sessions in unrelated repos (§6).
-hook_wellformed() {
-  stderr_empty
-  jq -e 'type == "object"' "$OUT" >/dev/null \
-    || fail "'$STEP' must write one JSON object"
-}
-
-# `{}`: the gate did not match, and the hook has nothing to say.
-noop() { jqok '. == {}'; }
-
 stderr_empty() {
   [ ! -s "$ERR" ] || fail "stderr should be empty for '$STEP'"
 }
@@ -105,7 +91,6 @@ grep -q "4  \`status\` only: open heads remain" "$OUT" \
   || fail "--help should carry the exit-4 row"
 grep -q "one \`-\` per invocation" "$OUT" || fail "--help should state the stdin rule"
 grep -q "3  a slug was refused" "$OUT" || fail "--help should not call a read a write"
-grep -q "\`hook\` is exempt" "$OUT" || fail "--help should say hooks always exit 0"
 
 echo
 echo "== no store, no HEAD (exit 5)"
@@ -552,246 +537,6 @@ same "$(jqv .tree)" "$(cat "$WORK/smoke-repo/.hydra/HEAD")" "mutation .tree vs H
 same "$(jqv .counts.tree)" "$(jqv .tree)" ".counts.tree agrees with .tree"
 
 echo
-echo "== grill: the session lease of §6"
-readonly SESSION="smoke-session-1"
-run 0 grill start --session-id "$SESSION"
-jqok '.op == "grill start" and .session_id == "smoke-session-1"'
-jqok '.tree == "hydra-design" and .counts.tree == "hydra-design"'
-jqok 'has("started_at") and .counts.open > 0'
-readonly LEASE="$WORK/smoke-repo/.hydra/grill"
-[ -f "$LEASE" ] || fail "grill start should have written .hydra/grill"
-jq -e '. == {session_id: "smoke-session-1", tree: "hydra-design", started_at: .started_at}' \
-  "$LEASE" >/dev/null || fail "the lease should carry exactly §6's three fields"
-echo "-- the lease is not a tree, so it must not turn up in \`trees\`"
-run 0 trees
-jqok '[.trees[].tree] == ["hydra-design", "nested", "smoke-repo"]'
-
-echo "-- restarting the same session must not lie about when the grilling began"
-# Backdated by hand. Timestamps are whole seconds (§3), so comparing two `grill
-# start` calls a moment apart would agree whatever the code between them did.
-jq '.started_at = "2020-01-01T00:00:00Z"' "$LEASE" >"$WORK/lease"
-mv "$WORK/lease" "$LEASE"
-run 0 grill start --session-id "$SESSION"
-same "$(jqv .started_at)" "2020-01-01T00:00:00Z" "grill start is idempotent in a session"
-same "$(jq -r .started_at "$LEASE")" "2020-01-01T00:00:00Z" "and the lease agrees"
-
-echo "-- \$CLAUDE_CODE_SESSION_ID is where a real session's id comes from"
-code=0
-CLAUDE_CODE_SESSION_ID=from-the-environment "$BIN" grill start >"$OUT" 2>"$ERR" </dev/null \
-  || code=$?
-STEP="CLAUDE_CODE_SESSION_ID=... hydra grill start"
-[ "$code" -eq 0 ] || fail "expected exit 0, got $code"
-jqok '.session_id == "from-the-environment"'
-echo "-- ...and the lease it displaced is named, without implying a live competitor:"
-echo "   nothing releases a lease on a clean exit, so this is the usual case"
-err_has "replacing a lease left by session smoke-session-1"
-
-echo "-- with neither, a lease no hook could ever match is refused rather than written"
-echo "   (exit 2: the fix is on the command line or in the environment, not the store)"
-code=0
-(unset CLAUDE_CODE_SESSION_ID; "$BIN" grill start >"$OUT" 2>"$ERR" </dev/null) || code=$?
-STEP="hydra grill start (no session id)"
-[ "$code" -eq 2 ] || fail "expected exit 2, got $code"
-stdout_empty
-err_has "CLAUDE_CODE_SESSION_ID"
-err_has "hydra grill start"
-same "$(jq -r .session_id "$LEASE")" "from-the-environment" \
-  "a refused start must leave the lease it found alone"
-
-run 0 grill start --session-id "$SESSION"
-
-echo
-echo "== hook session-start: one verb, two of §6's rows, split on \`source\`"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}"
-run 0 hook session-start
-hook_wellformed
-jqok '.systemMessage | test("^hydra: [0-9]+ open heads on .hydra-design. . /hydra:hydra to resume$")'
-jqok 'has("hookSpecificOutput") == false and has("decision") == false'
-echo "-- resume is the same row as startup"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"resume\"}"
-run 0 hook session-start
-jqok 'has("systemMessage")'
-
-echo "-- compact and clear reload the whole resume payload into additionalContext"
-for source in compact clear; do
-  IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"$source\"}"
-  run 0 hook session-start
-  hook_wellformed
-  jqok '.hookSpecificOutput.hookEventName == "SessionStart"'
-  jqok 'has("systemMessage") == false'
-  jqok ".hookSpecificOutput.additionalContext | contains(\"($source)\")"
-  # additionalContext is text, so the payload inside it has to survive a round
-  # trip through `fromjson` to be worth anything to the model.
-  jqok '(.hookSpecificOutput.additionalContext | sub("^[^{]*"; "") | fromjson) as $r
-        | $r.counts.tree == "hydra-design" and ($r.skeleton | length) == 9
-        and $r.hydrated[-1].slug == $r.next'
-done
-
-echo "-- the lease is the gate: another session's payload gets nothing"
-IN='{"session_id":"another-session","hook_event_name":"SessionStart","source":"compact"}'
-run 0 hook session-start
-hook_wellformed
-noop
-echo "-- nor does a payload with no session_id at all"
-IN='{"hook_event_name":"SessionStart","source":"compact"}'
-run 0 hook session-start
-noop
-echo "-- nor a source §6's table has no row for"
-for source in fork "" STARTUP; do
-  IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"$source\"}"
-  run 0 hook session-start
-  noop
-done
-
-echo
-echo "== hook post-tool-use: the tree, to the user, after a \`hydra \` command"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"hydra cut lifecycle --answer x\"}}"
-run 0 hook post-tool-use
-hook_wellformed
-jqok '.systemMessage | startswith("hydra-design  (")'
-jqok '.systemMessage | contains("← next")'
-jqok 'has("decision") == false and has("hookSpecificOutput") == false'
-echo "-- it is the same render \`hydra tree\` prints"
-"$BIN" tree > "$WORK/render"
-same "$(jqv .systemMessage)" "$(cat "$WORK/render")" "systemMessage vs hydra tree"
-
-echo "-- gated on \`hydra\` as a whole word, so every way of naming the binary counts"
-for command in "/usr/local/bin/hydra next" '\"$HOME/bin/hydra\" next' \
-  "\$(which hydra) ready" "git-hydra sync && hydra next" "hydra"; do
-  IN="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$command\"}}"
-  run 0 hook post-tool-use
-  jqok 'has("systemMessage")'
-done
-echo "-- ...and a longer name is a different thing, as is reading the store"
-for command in "myhydra tree" "./nothydra ready" "foo.hydra tree" "hydraulics --help" \
-  "cat .hydra/HEAD" "ls hydra-plugin/hooks" "cargo build" ""; do
-  IN="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$command\"}}"
-  run 0 hook post-tool-use
-  noop
-done
-echo "-- and on the tool: another tool's input is not this row's subject"
-IN='{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"command":"hydra tree"}}'
-run 0 hook post-tool-use
-noop
-echo "-- but on no lease (§6): only a grilling session runs \`hydra cut\`"
-IN='{"session_id":"another-session","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"hydra next"}}'
-run 0 hook post-tool-use
-jqok 'has("systemMessage")'
-
-echo
-echo "== hook stop: §6's enforcement"
-NEXT_SLUG="$("$BIN" next | jq -r .slug)"; readonly NEXT_SLUG
-[ "$NEXT_SLUG" != "null" ] || fail "there should be a next head to block on"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}"
-run 0 hook stop
-hook_wellformed
-jqok '.decision == "block"'
-jqok '.reason | contains("the interview is not finished")'
-jqok '.reason | contains("hydra grill stop")'
-jqok 'has("hookSpecificOutput") == false and has("systemMessage") == false'
-echo "-- and the reason carries \`hydra next\`, parseable"
-same "$(jqv '.reason | sub("^[^{]*"; "") | fromjson | .slug')" "$NEXT_SLUG" \
-  "the head the block hands over"
-
-echo "-- but not when HEAD has moved off the leased tree: the head it would hand"
-echo "   over is one \`hydra next\` and \`hydra cut\` could not see"
-run 0 use nested
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\"}"
-run 0 hook stop
-noop
-echo "-- while the compact reload still reads the tree the lease names"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"compact\"}"
-run 0 hook session-start
-jqok '(.hookSpecificOutput.additionalContext | sub("^[^{]*"; "") | fromjson | .counts.tree) == "hydra-design"'
-run 0 use hydra-design
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\"}"
-run 0 hook stop
-jqok '.decision == "block"'
-
-echo "-- at most one block per turn: stop_hook_active is Claude Code's own flag"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":true}"
-run 0 hook stop
-noop
-echo "-- only inside a live lease"
-IN='{"session_id":"another-session","hook_event_name":"Stop"}'
-run 0 hook stop
-noop
-echo "-- and a mis-wired hooks.json must never deny somebody else's tool call"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\"}"
-run 0 hook stop
-noop
-
-echo
-echo "== an event name hydra does not know is \`{}\` and exit 0, never a usage error"
-# The one thing no unit test can cover: an argument clap would reject never reaches
-# hydra's code at all. And on Stop, exit 2 means *show stderr to the model and
-# continue the conversation* — so a hooks.json naming the event wrong, or a newer
-# plugin against an older binary, would otherwise become an un-lease-gated refusal
-# to end the turn in every project, with clap's usage text as the reason.
-for event in Stop STOP SessionStart session_start sessionstart pre-compact \
-  "stop extra" "post-tool-use --json"; do
-  IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\"}"
-  # Deliberately unquoted: "stop extra" has to arrive as two arguments.
-  # shellcheck disable=SC2086
-  run 0 hook $event
-  hook_wellformed
-  noop
-done
-echo "-- and so is no event at all"
-run 0 hook
-hook_wellformed
-noop
-echo "-- the three §9 spells are the three that work"
-for event in session-start post-tool-use stop; do
-  IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\"}"
-  run 0 hook "$event"
-  hook_wellformed
-done
-jqok '.decision == "block"'
-
-echo
-echo "== a hook is handed garbage in every project the plugin is installed in"
-for payload in '   ' 'not json at all' '[]' '42' 'null' '{' '{"session_id":7}' '{}'; do
-  for event in session-start post-tool-use stop; do
-    IN="$payload"
-    run 0 hook "$event"
-    hook_wellformed
-    noop
-  done
-done
-echo "-- including no stdin at all"
-for event in session-start post-tool-use stop; do
-  run 0 hook "$event"
-  hook_wellformed
-  noop
-done
-
-echo
-echo "== a hook in a repo that is not a hydra repo — the common case"
-cd "$WORK/bare"
-[ ! -d .hydra ] || fail "this directory is meant to have no store"
-for event in session-start post-tool-use stop; do
-  IN="{\"session_id\":\"$SESSION\",\"source\":\"startup\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"hydra tree\"}}"
-  run 0 hook "$event"
-  hook_wellformed
-  noop
-done
-cd "$WORK/smoke-repo"
-
-echo
-echo "== grill stop is the kill switch, and idempotent"
-run 0 grill stop
-jqok '.op == "grill stop" and .released.session_id == "smoke-session-1"'
-jqok '.released.tree == "hydra-design"'
-[ ! -f "$LEASE" ] || fail "the lease should be gone"
-run 0 grill stop
-jqok '.released == null'
-echo "-- with the lease released the Stop hook lets the turn end"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\"}"
-run 0 hook stop
-noop
-
-echo
 echo "== drive the frontier to done the way a skill would"
 for _ in $(seq 1 20); do
   slug="$("$BIN" next | jq -r '.slug // empty')"
@@ -812,36 +557,17 @@ jqok '[.trees[] | select(.tree == "hydra-design") | .counts.done] == [true]'
 jqok 'all(.trees[]; has("error") == false)'
 
 echo
-echo "== a done tree has nothing to announce and nothing to be relentless about"
-run 0 grill start --session-id "$SESSION"
-jqok '.counts.done == true'
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}"
-run 0 hook session-start
-noop
-echo "-- blocking with no head to hand over would wall the session in"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"Stop\"}"
-run 0 hook stop
-noop
-echo "-- but §6 gates the compact reload on the lease alone, so the record still lands"
-IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"compact\"}"
-run 0 hook session-start
-jqok '(.hookSpecificOutput.additionalContext | sub("^[^{]*"; "") | fromjson | .counts.done) == true'
-
-echo
-echo "== hydra-plugin: the wiring of §6, parsed out of hooks.json and executed"
-# The plugin ships zero scripts (§6), so its `hooks.json` command strings are the
-# whole contract between the plugin and this binary. That makes them the one part
-# of the plugin testable from here: parse each one out with `jq` and run it. A
-# renamed verb still exits 0 and still prints one JSON object — `hook` is built
-# that way on purpose — so what fails here is the *gate*, which stops firing.
+echo "== hydra-plugin: the two files of §6"
+# The plugin is data, not code: a manifest and a skill, no hooks and no scripts.
+# So what is checkable from here is that both files are there, parse, and carry
+# the fields Claude Code addresses them by.
 readonly PLUGIN="$ROOT/hydra-plugin"
 readonly MANIFEST="$PLUGIN/.claude-plugin/plugin.json"
-readonly HOOKS="$PLUGIN/hooks/hooks.json"
 readonly SKILL="$PLUGIN/skills/hydra/SKILL.md"
 
-echo "-- §6's three files and nothing else"
+echo "-- §6's two files and nothing else: a third would mean hooks or scripts crept back"
 same "$(cd "$PLUGIN" && find . -type f | sort | tr '\n' ' ')" \
-  "./.claude-plugin/plugin.json ./hooks/hooks.json ./skills/hydra/SKILL.md " \
+  "./.claude-plugin/plugin.json ./skills/hydra/SKILL.md " \
   "the plugin's file list"
 
 echo "+ jq . plugin.json"
@@ -854,123 +580,10 @@ jq -e '.description | test("hydra` binary")' "$MANIFEST" >/dev/null \
 echo "+ head -3 skills/hydra/SKILL.md"
 grep -qx 'name: hydra' "$SKILL" || fail "the skill must be named hydra (§6)"
 grep -q '^description: ' "$SKILL" || fail "the skill needs a description to trigger on"
-
-echo "+ jq . hooks/hooks.json"
-# Claude Code parses this file as `{description?, hooks}` and takes `.hooks`, so
-# an unwrapped event map is discarded silently and the plugin does nothing at all.
-jq -e 'has("hooks") and (.hooks | type == "object")' "$HOOKS" >/dev/null \
-  || fail "hooks.json needs the plugin wrapper: {\"hooks\": {...}}"
-jq -e '[.hooks | keys[]] == ["PostToolUse", "SessionStart", "Stop"]' "$HOOKS" >/dev/null \
-  || fail "hooks.json should wire exactly §6's three events"
-jq -e '[.hooks[][]] | length == 3' "$HOOKS" >/dev/null \
-  || fail "one matcher row per event"
-jq -e 'all(.hooks[][].hooks[]; .type == "command" and (.command | startswith("hydra hook ")))' \
-  "$HOOKS" >/dev/null || fail "every hook shells straight to \`hydra hook <event>\` (§9)"
-# Below the default and a hook that has work to do gets killed mid-answer.
-jq -e 'all(.hooks[][].hooks[]; has("timeout") == false)' "$HOOKS" >/dev/null \
-  || fail "no timeout: the default is the contract"
-echo "-- one SessionStart row covers both of §6's rows: \`hydra hook session-start\`"
-echo "   branches on the payload's \`source\` itself, in tested Rust"
-jq -e '.hooks.SessionStart[0].matcher == "startup|resume|compact|clear"' "$HOOKS" >/dev/null \
-  || fail "the SessionStart matcher should carry all four sources §6 names"
-echo "-- but never \`fork\`: a fork gets a new session_id, so the lease cannot match"
-jq -e '.hooks.SessionStart[0].matcher | contains("fork") == false' "$HOOKS" >/dev/null \
-  || fail "fork is a source hydra no-ops on"
-jq -e '.hooks.PostToolUse[0].matcher == "Bash"' "$HOOKS" >/dev/null \
-  || fail "§6 gives PostToolUse a Bash matcher"
-jq -e '.hooks.Stop[0] | has("matcher") == false' "$HOOKS" >/dev/null \
-  || fail "§6's Stop row has no matcher"
-
-echo "-- and now run each command string as Claude Code would: a shell, a payload"
-echo "   on stdin, \`hydra\` resolved off PATH"
-mkdir -p "$WORK/bin" "$WORK/plugin-repo"
-ln -sf "$BIN" "$WORK/bin/hydra"
-readonly PLUGIN_SESSION="plugin-session-1"
-(
-  cd "$WORK/plugin-repo"
-  "$BIN" init >/dev/null
-  "$BIN" sprout --question "Does the wiring hold?" --slug wiring >/dev/null
-  "$BIN" sprout --question "Is it still wired?" --parent wiring --slug still-wired >/dev/null
-  "$BIN" cut wiring --answer "yes, and this is the answer the render shows" >/dev/null
-  "$BIN" grill start --session-id "$PLUGIN_SESSION" >/dev/null
-) || fail "could not build the scratch store for the plugin's hooks"
-
-# One payload per event, carrying everything §6's gate for that row reads.
-hook_payload() {
-  case "$1" in
-    SessionStart)
-      printf '{"session_id":"%s","hook_event_name":"SessionStart","source":"startup"}' \
-        "$PLUGIN_SESSION" ;;
-    PostToolUse)
-      printf '{"session_id":"%s","hook_event_name":"PostToolUse","tool_name":"Bash",' \
-        "$PLUGIN_SESSION"
-      printf '"tool_input":{"command":"hydra cut wiring --answer x"}}' ;;
-    Stop)
-      printf '{"session_id":"%s","hook_event_name":"Stop","stop_hook_active":false}' \
-        "$PLUGIN_SESSION" ;;
-    *) fail "hooks.json declares an event this script has no payload for: $1" ;;
-  esac
-}
-
-while IFS=$'\t' read -r event command; do
-  echo "+ [$event] $command"
-  STEP="hooks.json [$event] $command"
-  code=0
-  hook_payload "$event" | (
-    cd "$WORK/plugin-repo"
-    export PATH="$WORK/bin:$PATH"
-    eval "$command"
-  ) >"$OUT" 2>"$ERR" || code=$?
-  [ "$code" -eq 0 ] || fail "a hook must exit 0, got $code"
-  hook_wellformed
-  # The gate. This is what a renamed verb breaks: `hydra hook <unknown>` is a
-  # well-formed `{}` and exit 0, so only the gate not firing gives it away.
-  case "$event" in
-    # `/hydra:hydra`, both halves: Claude Code addresses a plugin's skill
-    # `plugin:skill` and does not collapse the case where the names match, and this
-    # line is the only place a user is told what to type.
-    SessionStart) jqok '.systemMessage | test("^hydra: 1 open head on .plugin-repo. . /hydra:hydra to resume$")' ;;
-    PostToolUse) jqok '.systemMessage | startswith("plugin-repo  (1 answered, 1 open)")' ;;
-    Stop) jqok '.decision == "block" and (.reason | contains("still-wired"))' ;;
-  esac
-done < <(jq -r '.hooks | to_entries[] as $e | $e.value[].hooks[]
-                | [$e.key, .command] | @tsv' "$HOOKS")
-
-# The `2>/dev/null || true` on each command string, and the only place it is
-# written down: §6 ships the binary as a *separate* prerequisite, so a plugin
-# installed without it would report `command not found` in every project the user
-# opens. Worse on `Stop`, where Claude Code reads exit 2 as *block* whatever is on
-# stdout — so a missing binary would become a shell error refusing to end the
-# turn. `hydra hook` exits 0 and writes nothing to stderr by design (see
-# `HOOKS_ALWAYS_SUCCEED`), so the guard costs an installed hydra nothing.
-echo "-- the guard on each command string is for the missing binary, not for a"
-echo "   failing one: a plugin installed without it must stay silent rather than"
-echo "   report it everywhere, and on Stop a nonzero exit is a refusal to stop"
-mkdir -p "$WORK/empty-bin"
-# Read out before PATH goes away: `jq` would not be findable afterwards either.
-COMMANDS=()
-while IFS= read -r command; do
-  COMMANDS+=("$command")
-done < <(jq -r '.hooks[][].hooks[].command' "$HOOKS")
-for command in "${COMMANDS[@]}"; do
-  STEP="hooks.json with no hydra on PATH: $command"
-  echo "+ PATH=(empty) $command"
-  code=0
-  (
-    cd "$WORK/plugin-repo"
-    # Emptying the search path is the whole point: this is the repo where hydra
-    # was never installed. Scoped to the subshell.
-    # shellcheck disable=SC2123
-    PATH="$WORK/empty-bin"
-    printf '{}' | eval "$command"
-  ) >"$OUT" 2>"$ERR" || code=$?
-  [ "$code" -eq 0 ] || fail "expected exit 0 with no binary to run, got $code"
-  stderr_empty
-  [ ! -s "$OUT" ] || fail "nothing to say, so nothing on stdout"
-done
-
-(cd "$WORK/plugin-repo" && "$BIN" grill stop >/dev/null)
-
+# `/hydra:hydra`, both halves: Claude Code addresses a plugin's skill
+# `plugin:skill` and does not collapse the case where the names match. The skill's
+# own description is now the only place a user is told what to type.
+grep -q '/hydra:hydra' "$SKILL" || fail "the skill should name itself /hydra:hydra"
 echo
 echo "== the stored file is still the shape §3 asks for"
 # No pipes into `grep -q`: it exits at the first match, and under `pipefail` the
@@ -1000,30 +613,6 @@ jqok '[.trees[] | select(.tree == "hydra-design") | has("counts")] == [false]'
 echo "-- the other trees are still listed, with their counts"
 jqok '[.trees[] | select(.error == null) | .tree] == ["nested", "smoke-repo"]'
 jqok '[.trees[] | select(.tree == "smoke-repo") | .counts.done] == [true]'
-
-echo
-echo "-- a hook must no-op on a corrupt tree, not report it: exit 0, {} and no stderr"
-# One payload that satisfies every gate but the tree, and no `hook_event_name`, so
-# each verb reaches its own gate rather than being turned away for the wrong reason.
-for source in startup compact; do
-  for event in session-start post-tool-use stop; do
-    IN="{\"session_id\":\"$SESSION\",\"source\":\"$source\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"hydra tree\"}}"
-    run 0 hook "$event"
-    hook_wellformed
-    noop
-  done
-done
-
-echo "-- grill start refuses a tree it cannot read, so the lease never names one"
-run 1 grill start --session-id another-session
-stdout_empty
-err_has "malformed JSON"
-same "$(jq -r .session_id "$LEASE")" "$SESSION" "a refused start must not take the lease"
-
-echo "-- but grill stop is the kill switch, so it reads no tree and always works"
-run 0 grill stop
-jqok '.released.session_id == "smoke-session-1"'
-[ ! -f "$LEASE" ] || fail "the kill switch must work on a store nothing else will load"
 
 echo
 echo "smoke: OK"

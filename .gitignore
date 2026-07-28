@@ -1,5 +1,4 @@
 /target
 
-# Session state, not decisions (SPEC §3, §6).
-.hydra/grill
+# Session state, not decisions (SPEC §3).
 .hydra/*.lock

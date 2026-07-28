@@ -49,9 +49,9 @@ pub struct Skeleton {
     /// `cauterised` would teach a consumer that §2 stores three states.
     pub status: Status,
     /// The derived view of the same head. One word per row against §7's budget,
-    /// and it is what makes the skeleton answer "can that one be asked?" — after
-    /// the `compact` hook reload (§6) the payload is all the model has, so
-    /// without it a request to jump to a named head is a guess or a `show`.
+    /// and it is what makes the skeleton answer "can that one be asked?" — on a
+    /// cold start this payload is all the model has, so without it a request to
+    /// jump to a named head is a guess or a `show`.
     pub state: State,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,

@@ -13,7 +13,6 @@ use crate::{Error, Result, slug};
 
 pub const DIR: &str = ".hydra";
 pub const HEAD: &str = "HEAD";
-pub const GRILL: &str = "grill";
 
 /// §9 calls for a blocking lock with a short timeout: contention is a second
 /// agent in the same repo, not a thundering herd.
@@ -76,12 +75,6 @@ impl Store {
         self.dir.join(HEAD)
     }
 
-    /// §3's session lease, which `grill` owns. Session state, so it is
-    /// gitignored, and `trees` already knows it is not a tree.
-    pub fn grill_path(&self) -> PathBuf {
-        self.dir.join(GRILL)
-    }
-
     /// The sidecar the read-modify-write lock is taken on. Deliberately *not*
     /// the tree file: `save` replaces that by rename, and an flock is held on
     /// the inode, so a lock taken on the pre-rename inode excludes nobody once
@@ -112,9 +105,9 @@ impl Store {
     ///
     /// §3 names a tree's file `<slug>.json`, and that convention lives here next
     /// to `tree_path` rather than in the caller. Everything else in `.hydra/` is
-    /// not a tree: `HEAD`, the lock sidecars, the grill lease (§6) — and a
-    /// `.json` whose stem is not a slug (§2) cannot be one either, since nothing
-    /// hydra writes could have named it.
+    /// not a tree: `HEAD`, the lock sidecars — and a `.json` whose stem is not a
+    /// slug (§2) cannot be one either, since nothing hydra writes could have
+    /// named it.
     ///
     /// Names the trees; does not load them. A store with one unreadable file
     /// still has an answer to "what is in here", which is the question this is
@@ -208,9 +201,9 @@ impl Store {
         Ok(tree)
     }
 
-    /// Crate-private: `.hydra/` is this module's layout, and the one other
-    /// writer in the crate is `grill`, whose lease lives in it.
-    pub(crate) fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+    /// Private: `.hydra/` is this module's layout, and nothing outside it writes
+    /// into the directory.
+    fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         // The temp file must live in the target's directory: `persist` is a
         // rename, and a rename across filesystems is not atomic (§9).
         let mut tmp = NamedTempFile::new_in(&self.dir).map_err(Error::io(&self.dir))?;
@@ -390,7 +383,6 @@ mod tests {
         // Everything a real store carries alongside its trees, plus a `.json`
         // whose stem is not a slug: none of these are trees, and an unreadable
         // one still is.
-        fs::write(store.dir().join("grill"), "{}").unwrap();
         fs::write(store.dir().join("notes.txt"), "").unwrap();
         fs::write(store.dir().join("Not A Slug.json"), "{}").unwrap();
         fs::write(store.tree_path("half-written"), "{ not json").unwrap();

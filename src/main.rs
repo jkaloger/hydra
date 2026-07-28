@@ -14,9 +14,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 
 use hydra::model::Tree;
-use hydra::{
-    Cauterise, Counts, Cut, Sprout, Store, graph, grill, hook, query, render, slug, store,
-};
+use hydra::{Cauterise, Counts, Cut, Sprout, Store, graph, query, render, slug, store};
 
 /// Exit codes. §5 gives `status` a nonzero-while-open contract and §4 gives every
 /// invariant rejection a nonzero exit, so a caller has to be able to tell those
@@ -40,17 +38,6 @@ mod exit {
     /// Nothing was addressed, so nothing was attempted.
     pub const NO_TREE: i32 = 5;
 }
-
-/// `hook` opts out of the table above and always exits `OK`.
-///
-/// The codes above address a caller who can read a message and try again. A hook
-/// has no such caller: Claude Code reads the exit code as part of the protocol —
-/// 2 means *block* on several events — and shows stderr from any other nonzero
-/// code to a user who never asked for hydra. Since the plugin's hooks fire in
-/// every project once installed (§6), the only safe contract is one JSON object on
-/// stdout and 0, whatever the payload said and whatever is or is not in the repo.
-/// See `hook.rs`.
-const HOOKS_ALWAYS_SUCCEED: i32 = exit::OK;
 
 /// The `<text|->` placeholder of §5.
 const STDIN: &str = "-";
@@ -78,10 +65,7 @@ Exit codes:
      stderr names the offending slugs
   4  `status` only: open heads remain
   5  tree addressing: no .hydra/, no HEAD, no such tree, one that already
-     exists, or one written by a newer hydra
-
-`hook` is exempt: it always exits 0 and writes one JSON object, because Claude
-Code reads a hook's exit code as part of its own protocol."
+     exists, or one written by a newer hydra"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -234,51 +218,6 @@ enum Command {
 
     /// ASCII render of the tree. The one command whose output is for eyes.
     Tree,
-
-    /// Take or release the session lease that arms the hooks.
-    Grill {
-        #[command(subcommand)]
-        command: GrillCommand,
-    },
-
-    /// Answer one Claude Code hook: hook JSON on stdin, hook JSON on stdout.
-    ///
-    /// Not a call you make by hand. It is what the plugin's hooks.json shells to,
-    /// so it always exits 0 and always writes one JSON object — `{}` when no gate
-    /// matched, which is the usual answer in a repo that has no .hydra/.
-    ///
-    /// EVENT is one of session-start, post-tool-use, stop. Anything else, an EVENT
-    /// that is missing, and more than one of them all answer `{}` and exit 0 as
-    /// well; see the note on the exit table.
-    Hook {
-        /// The event whose payload is on stdin: session-start, post-tool-use, stop.
-        #[arg(value_name = "EVENT", trailing_var_arg = true)]
-        event: Vec<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum GrillCommand {
-    /// Take the lease: record this session as the one grilling the HEAD tree.
-    ///
-    /// The hooks compare their payload's session_id against the lease and stay
-    /// silent unless it matches, so a lease left behind by a session that died can
-    /// never fire. Nothing has to clean it up.
-    ///
-    /// Displaces a lease held by another session: there is one lease, and taking
-    /// it is how a session says the interview is now its own.
-    Start {
-        /// The session to record. Defaults to $CLAUDE_CODE_SESSION_ID, which is
-        /// the same id the hooks will report.
-        #[arg(long, value_name = "ID")]
-        session_id: Option<String>,
-    },
-
-    /// Release the lease. The kill switch: the hooks go quiet immediately.
-    ///
-    /// Reads neither HEAD nor any tree, so it works on a store nothing else will
-    /// load. Exits 0 whether or not there was a lease to release.
-    Stop,
 }
 
 fn main() {
@@ -520,131 +459,13 @@ fn run(command: Command) -> anyhow::Result<i32> {
 
         Command::Tree => {
             let tree = head_tree()?;
-            // Not `print!`: `std::io::_print` panics on a write failure, and §6's
-            // `PostToolUse` hook pipes this. `render` already ends in a newline.
+            // Not `print!`: `std::io::_print` panics on a write failure, and this
+            // is the output most likely to be piped. `render` already ends in a
+            // newline.
             write_stdout(&render(&tree))?;
         }
-
-        Command::Grill { command } => return run_grill(command),
-
-        Command::Hook { event } => return Ok(run_hook(&event)),
     }
     Ok(exit::OK)
-}
-
-/// The lease of §6. Ordinary CLI calls, unlike `hook` — the skill runs these, and
-/// a skill can read a message and a code.
-fn run_grill(command: GrillCommand) -> anyhow::Result<i32> {
-    match command {
-        GrillCommand::Start { session_id } => {
-            let store = Store::discover()?;
-            let head = store.head()?;
-            // Loaded before the lease is written, the way `use` loads before
-            // moving HEAD: a lease naming a tree that will not load is a lease no
-            // hook can act on.
-            let tree = store.load(&head)?;
-            let session_id = resolve_session_id(session_id);
-            if let Some(displaced) = grill::read(&store).filter(|held| !held.holds(&session_id)) {
-                // Deliberately not phrased as a competitor. Nothing releases the
-                // lease when a session ends cleanly — correct per §6, since a stale
-                // lease is inert — so this fires on every interview after the first
-                // in any repo ever grilled, and `start` cannot tell a leftover from
-                // a live holder without the liveness check §6 rules out. "Another
-                // agent is grilling this repo right now" is the wrong thing for the
-                // model to read out of the usual case.
-                eprintln!(
-                    "hydra: replacing a lease left by session {} on '{}'",
-                    displaced.session_id, displaced.tree
-                );
-            }
-            let lease = grill::start(&store, &session_id, &head)?;
-            emit(&Grilling {
-                op: "grill start",
-                lease,
-                counts: query::status(&tree),
-            })?;
-        }
-
-        GrillCommand::Stop => {
-            let store = Store::discover()?;
-            emit(&Released {
-                op: "grill stop",
-                released: grill::stop(&store)?,
-            })?;
-        }
-    }
-    Ok(exit::OK)
-}
-
-/// One hook: payload on stdin, envelope on stdout, exit 0 (see
-/// `HOOKS_ALWAYS_SUCCEED`).
-///
-/// Every failure here collapses to the same answer as every gate that did not
-/// match — `{}` — so nothing reaches `report`, nothing reaches stderr, and a
-/// stdout that has stopped listening is not worth a word either.
-///
-/// The event arrives as a `Vec<String>` and is resolved here rather than by a clap
-/// `ValueEnum`, which is the difference between an unrecognised event answering
-/// `{}` and clap refusing it with exit 2 before any of this runs. On `Stop`, exit 2
-/// means *show stderr to the model and continue the conversation*, so a `hooks.json`
-/// that says `hydra hook Stop` — the casing of the event *key* — would otherwise
-/// turn into an unconditional, un-lease-gated refusal to end the turn, in every
-/// project the plugin is installed in, with clap's usage text as the reason. The
-/// same goes for a newer plugin naming an event an older binary has never heard of,
-/// which §6 makes ordinary skew by shipping the binary as a separate prerequisite.
-///
-/// Stdin is drained first either way: the writer on the other end has a payload to
-/// finish sending, whatever hydra makes of the arguments.
-fn run_hook(event: &[String]) -> i32 {
-    let mut raw = String::new();
-    let payload = io::stdin()
-        .read_to_string(&mut raw)
-        .ok()
-        .and_then(|_| hook::Payload::parse(&raw));
-    // One argument, spelled exactly as §9 spells it. Nothing is matched loosely:
-    // an event hydra half-recognises is one it would answer with the wrong gate.
-    let event = match event {
-        [only] => hook::Event::parse(only),
-        _ => None,
-    };
-    let response = match (event, payload) {
-        // Discovery failing is the ordinary case, not an error: most repos have no
-        // `.hydra/` and the plugin's hooks fire in all of them.
-        (Some(event), Some(payload)) => {
-            hook::respond(Store::discover().ok().as_ref(), event, &payload)
-        }
-        _ => hook::Response::default(),
-    };
-    let _ = write_stdout(&format!("{}\n", hook::to_json(&response)));
-    HOOKS_ALWAYS_SUCCEED
-}
-
-/// §5 gives `grill start` no arguments, so the id comes from the environment:
-/// Claude Code exports `CLAUDE_CODE_SESSION_ID` into every command it runs, and it
-/// is the same id the hooks report on stdin. `--session-id` drives the lease from
-/// anything else.
-///
-/// Refused rather than defaulted when there is neither. A lease carrying an id no
-/// hook will ever send is a lease that silently does nothing, which would make
-/// §6's gating look broken from the inside; saying so lets the skill degrade the
-/// way it already degrades when the binary is missing.
-///
-/// Reported as a usage error, like every other command-line mistake hydra spots for
-/// itself: the fix is on the command line or in the environment that invoked it, not
-/// in the store, so this is `usage` and exit 2 rather than exit 1.
-fn resolve_session_id(given: Option<String>) -> String {
-    let from_env = std::env::var(grill::SESSION_ENV).unwrap_or_default();
-    let session_id = given.unwrap_or(from_env).trim().to_string();
-    if session_id.is_empty() {
-        usage(
-            "grill start",
-            &format!(
-                "no session to grill: ${} is unset or empty, so pass --session-id",
-                grill::SESSION_ENV
-            ),
-        );
-    }
-    session_id
 }
 
 /// The response shape of every mutation. §4's last line asks each one to echo the
@@ -678,27 +499,6 @@ impl Mutation {
             counts: query::status(tree),
         }
     }
-}
-
-/// `grill start`'s response: the lease as §6 stores it, flattened in, plus the
-/// counts of the tree it was taken on — the skill's next question after taking the
-/// lease is always "is there anything to ask?" (§6's interview protocol).
-#[derive(Serialize)]
-struct Grilling {
-    op: &'static str,
-    #[serde(flatten)]
-    lease: grill::Lease,
-    counts: Counts,
-}
-
-/// `grill stop`'s response. No tree echo: the kill switch reads no tree, on
-/// purpose.
-#[derive(Serialize)]
-struct Released {
-    op: &'static str,
-    /// What was let go, `null` when there was no lease — or when the file was
-    /// there but was not a lease, which is removed all the same.
-    released: Option<grill::Lease>,
 }
 
 #[derive(Serialize)]
@@ -899,16 +699,11 @@ fn parse_reject(raw: &str) -> Result<hydra::Rejected, String> {
 /// the verb that was misused instead of `hydra <COMMAND>`. Exited by hand rather
 /// than through `Error::exit` so the code comes from the table above instead of
 /// from clap's default.
-///
-/// `verb` may be a path — "grill start" — for a nested subcommand.
 fn usage(verb: &str, message: &str) -> ! {
     let mut root = Cli::command();
-    let mut found = &mut root;
-    for name in verb.split(' ') {
-        found = found
-            .find_subcommand_mut(name)
-            .expect("a verb clap just parsed");
-    }
+    let found = root
+        .find_subcommand_mut(verb)
+        .expect("a verb clap just parsed");
     // `bin_name` by hand: a subcommand plucked out of the root has not been
     // through clap's build, so its usage line would read `cut …` with no `hydra`.
     let mut cmd = found.clone().bin_name(format!("hydra {verb}"));

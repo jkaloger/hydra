@@ -26,30 +26,23 @@ is a default, not an instruction.
 
 ```bash
 command -v hydra || echo absent
-hydra grill start
+hydra resume
 ```
 
-Run `grill start` **every time this skill fires**, including when you wake
-mid-interview. It is idempotent within a session and it takes the lease that
-arms the hooks. `/clear` mints a new `session_id`, so the lease taken before it
-can never match again and no hook fires until you re-take it.
+Orient from `resume` **every time this skill fires**, including when you wake
+mid-interview. Nothing outside this skill reloads the tree for you: the state is
+on disk, and reading it is one command.
 
 If `command -v hydra` fails, say so in one line and **interview in context
 instead** — same loop, same discipline, tracked in your own notes. Do not stop.
 
-`grill start` exits **5** when there is no tree to grill. Then:
+`hydra resume` exits **5** when there is no tree to interview. Then:
 
 ```bash
 hydra init <slug>     # new interview; points HEAD at it
 hydra trees           # what already exists here
 hydra use <slug>      # resume a different one
-hydra grill start     # and take the lease
-```
-
-Then orient:
-
-```bash
-hydra resume
+hydra resume          # and orient
 ```
 
 ## Exit codes are the interface
@@ -91,9 +84,10 @@ next question:
 - **`hydra next`** — the head to ask, already hydrated (`ancestors` are its
   premises). `hydra ready` is every askable head if you want to choose a
   different one.
-
-Do not print `hydra tree` for the user's benefit after a mutation — a hook
-already renders it to them after any `hydra` command.
+- **`hydra tree`** — the ASCII render, the one output for eyes rather than for
+  you. Print it after a cut that reopened heads, or when the user asks where
+  things stand. Not every turn: it is noise between two questions in the same
+  branch.
 
 ## Asking
 
@@ -106,11 +100,10 @@ For the head `next` hands you:
 3. State a recommendation and why.
 4. Ask. Then **stop and wait**. Do not proceed on an assumed answer.
 
-The `Stop` hook will block that first attempt to end the turn and hand you the
-head again, saying the interview is not finished. That is not a cue to answer it
-yourself. Re-state the question and end the turn again — the second stop is let
-through, and the user gets asked. Inventing a `cut` to satisfy the hook is the
-one failure mode this skill cannot recover from.
+Ending the turn on a question is correct and nothing will stop you. Answering
+your own question to keep moving is the one failure mode this skill cannot
+recover from: a `cut` that records your guess as the user's decision is
+indistinguishable from a real one forever after.
 
 ## Recording the answer
 
@@ -154,8 +147,8 @@ hydra sprout --question 'Append-only or mutable?' --parent storage-format --slug
   <slug>` (`--parent ''` roots it).
 - **Never gate a head on its own descendant.** The cascade walks children and
   `blocked_by` as one relation, so `link a --blocked-by b` where `b` sits under
-  `a` makes the two reopen each other forever: `status` never leaves 4, `next`
-  never returns `null`, and the `Stop` hook never lets the interview finish.
+  `a` makes the two reopen each other forever: `status` never leaves 4 and `next`
+  never returns `null`, so the interview can never finish.
   Hydra refuses that edge (exit 3, naming the loop). `link --force` overrides it
   and is the one flag that can build a tree which can never reach done — do not.
   Gating on an **ancestor** is the normal, correct case: staleness already flows
@@ -203,29 +196,32 @@ answer, `hydra reword <slug> --question <text|->` leaves the answer alone.
 
 ## After a context reset
 
-A compaction injects the whole `hydra resume` payload back into your context with
-a line saying context was reset. When that happens: do not summarise, do not
-start over, do not re-ask anything the skeleton shows as answered. Carry on from
-`next`.
+Nothing is injected back into your context — not after a compaction, not after a
+`/clear`, not in a new session next week. Recovery is yours and it is one
+command:
 
-After a `/clear` nothing is injected at all — the session id changed. Re-run
-`hydra grill start`, then `hydra resume`.
+```bash
+hydra resume
+```
+
+If you find yourself mid-interview with no memory of it, that is the situation
+this tool exists for. Run `resume`, read the skeleton, carry on from `next`. Do
+not summarise what you have lost, do not start over, and do not re-ask anything
+the skeleton shows as answered.
 
 ## Finishing
 
-The interview ends when the tree is done, not when it feels done. While a lease is
-live, a hook refuses the first attempt to end each turn and hands you the next
-head — that is the design, not a malfunction, and the second attempt goes through
-(see *Asking*).
+The interview ends when the tree is done, not when it feels done.
 
 ```bash
 hydra status        # exit 0 = done, exit 4 = open heads remain
-hydra grill stop    # release the lease
 ```
 
-Call `hydra grill stop` when the tree reaches done, or the moment the user asks
-to stop — otherwise the lease lingers and keeps arming the hooks. It is the kill
-switch and it always works.
+Exit 4 means keep going. Nothing in the runtime will stop you wrapping up early,
+so this is discipline rather than enforcement: check `status` before you conclude
+anything, and if heads remain, say what is left rather than summarising as though
+it were finished. Stopping because the *user* asked to stop is always fine — the
+tree is on disk and the next session picks it up.
 
 Commit `.hydra/<slug>.json`: the decisions are about the code and belong in its
-history. `.hydra/grill` is session state and is gitignored.
+history.
