@@ -101,6 +101,35 @@ impl Store {
         self.write_atomic(&self.head_path(), format!("{slug}\n").as_bytes())
     }
 
+    /// Every tree in the store, by slug, sorted.
+    ///
+    /// §3 names a tree's file `<slug>.json`, and that convention lives here next
+    /// to `tree_path` rather than in the caller. Everything else in `.hydra/` is
+    /// not a tree: `HEAD`, the lock sidecars, the grill lease (§6) — and a
+    /// `.json` whose stem is not a slug (§2) cannot be one either, since nothing
+    /// hydra writes could have named it.
+    ///
+    /// Names the trees; does not load them. A store with one unreadable file
+    /// still has an answer to "what is in here", which is the question this is
+    /// asked when something has gone wrong.
+    pub fn trees(&self) -> Result<Vec<String>> {
+        let entries = fs::read_dir(&self.dir).map_err(Error::io(&self.dir))?;
+        let mut slugs = Vec::new();
+        for entry in entries {
+            let path = entry.map_err(Error::io(&self.dir))?.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
+                && slug::is_valid(stem)
+            {
+                slugs.push(stem.to_string());
+            }
+        }
+        slugs.sort();
+        Ok(slugs)
+    }
+
     pub fn load(&self, slug: &str) -> Result<Tree> {
         slug::validate(slug)?;
         self.read_tree(&self.tree_path(slug), slug)
@@ -340,6 +369,32 @@ mod tests {
         assert_eq!(raw, to_json(&t).unwrap());
         assert!(raw.ends_with("}\n"));
         assert!(raw.contains("\n  \"heads\": {"), "should be pretty-printed");
+    }
+
+    #[test]
+    fn trees_names_the_trees_and_nothing_else() {
+        let (_root, store) = store();
+        for slug in ["storage-format", "hydra-design"] {
+            store.create(slug).unwrap();
+        }
+        store.set_head("hydra-design").unwrap();
+        // Everything a real store carries alongside its trees, plus a `.json`
+        // whose stem is not a slug: none of these are trees, and an unreadable
+        // one still is.
+        fs::write(store.dir().join("grill"), "{}").unwrap();
+        fs::write(store.dir().join("notes.txt"), "").unwrap();
+        fs::write(store.dir().join("Not A Slug.json"), "{}").unwrap();
+        fs::write(store.tree_path("half-written"), "{ not json").unwrap();
+
+        assert_eq!(
+            store.trees().unwrap(),
+            vec![
+                "half-written".to_string(),
+                "hydra-design".to_string(),
+                "storage-format".to_string()
+            ],
+            "sorted, lock sidecars and non-trees excluded, and naming a tree does not load it"
+        );
     }
 
     #[test]
