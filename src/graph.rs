@@ -22,6 +22,23 @@ use crate::{Error, Result, slug as slugs};
 /// text that goes with it.
 pub const CAUTERISED: &str = "cauterised";
 
+/// Which edge kind an operation was adding, for the §4.9 rejection: the reopen
+/// cascade runs over both kinds, so either can close a cycle in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    Parent,
+    BlockedBy,
+}
+
+impl std::fmt::Display for Edge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Edge::Parent => "parent",
+            Edge::BlockedBy => "blocked_by",
+        })
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Sprout<'a> {
     pub question: &'a str,
@@ -202,6 +219,19 @@ pub fn reparent(tree: &mut Tree, slug: &str, parent: Option<&str>) -> Result<()>
                 path,
             });
         }
+        // §4.9 by the other route: adopting a head that is already `blocked_by`
+        // this one closes the same union cycle, no `blocked_by` write involved.
+        // Absolute rather than forceable — §5 gives `reparent` no `--force`, so
+        // there is no surface to expose one through, and `link --force` remains
+        // the way to build the shape deliberately.
+        if let Some(path) = reopen_path(tree, parent, slug) {
+            return Err(Error::ReopenCycle {
+                slug: slug.to_string(),
+                edge: Edge::Parent,
+                other: parent.to_string(),
+                path: cycle_from(slug, path),
+            });
+        }
     }
     if head.parent.as_deref() == parent {
         return Ok(());
@@ -232,12 +262,27 @@ pub fn link(tree: &mut Tree, slug: &str, blocked_by: &str, force: bool) -> Resul
     // `--force` mean something different for self-edges, and the state it
     // produces — a head open forever — is reachable anyway by forcing a
     // two-head cycle.
-    if !force && let Some(path) = block_path(tree, blocked_by, slug) {
-        return Err(Error::BlockCycle {
-            slug: slug.to_string(),
-            blocked_by: blocked_by.to_string(),
-            path: std::iter::once(slug.to_string()).chain(path).collect(),
-        });
+    if !force {
+        if let Some(path) = block_path(tree, blocked_by, slug) {
+            return Err(Error::BlockCycle {
+                slug: slug.to_string(),
+                blocked_by: blocked_by.to_string(),
+                path: cycle_from(slug, path),
+            });
+        }
+        // §4.9. Gating a head on its own descendant closes a cycle across the
+        // union of both edge kinds — the parent edge runs down to the blocker and
+        // the blocked_by edge runs back up — which §4.3's `blocked_by`-only walk
+        // cannot see. The converse, gating a head on an *ancestor*, is the benign
+        // direction and stays legal: both edges then push staleness the same way.
+        if let Some(path) = reopen_path(tree, blocked_by, slug) {
+            return Err(Error::ReopenCycle {
+                slug: slug.to_string(),
+                edge: Edge::BlockedBy,
+                other: blocked_by.to_string(),
+                path: cycle_from(slug, path),
+            });
+        }
     }
     let mut edges = head.blocked_by.clone();
     edges.push(blocked_by.to_string());
@@ -430,17 +475,38 @@ fn ancestry_from(tree: &Tree, ancestor: &str, of: &str) -> Option<Vec<String>> {
     None
 }
 
-/// A path of `blocked_by` edges from `from` to `to`, inclusive.
-fn block_path(tree: &Tree, from: &str, to: &str) -> Option<Vec<String>> {
-    let mut path = Vec::new();
-    let mut seen = BTreeSet::new();
-    walk_blockers(tree, from, to, &mut seen, &mut path).then_some(path)
+/// A cycle for an error message. The walk already ends at `slug`, so prefixing it
+/// closes the loop: `slug -> <refused edge> -> ... -> slug`.
+fn cycle_from(slug: &str, path: Vec<String>) -> Vec<String> {
+    std::iter::once(slug.to_string()).chain(path).collect()
 }
 
-fn walk_blockers(
+/// A path of `blocked_by` edges from `from` to `to`, inclusive.
+fn block_path(tree: &Tree, from: &str, to: &str) -> Option<Vec<String>> {
+    walk_premises(tree, from, to, false)
+}
+
+/// The same walk with the parent pointer treated as an edge too, which makes it
+/// the reverse of the relation `cascade` runs over: `X` stands on its blockers
+/// *and* on its parent, because re-answering a parent reopens its children.
+///
+/// A path from `from` to `to` here means an edge `to → from` would close a cycle
+/// in the reopen cascade (§4.9).
+fn reopen_path(tree: &Tree, from: &str, to: &str) -> Option<Vec<String>> {
+    walk_premises(tree, from, to, true)
+}
+
+fn walk_premises(tree: &Tree, from: &str, to: &str, via_parent: bool) -> Option<Vec<String>> {
+    let mut path = Vec::new();
+    let mut seen = BTreeSet::new();
+    walk(tree, from, to, via_parent, &mut seen, &mut path).then_some(path)
+}
+
+fn walk(
     tree: &Tree,
     at: &str,
     to: &str,
+    via_parent: bool,
     seen: &mut BTreeSet<String>,
     path: &mut Vec<String>,
 ) -> bool {
@@ -452,8 +518,9 @@ fn walk_blockers(
         return true;
     }
     if let Some(head) = tree.heads.get(at) {
-        for next in &head.blocked_by {
-            if walk_blockers(tree, next, to, seen, path) {
+        let parent = head.parent.iter().filter(|_| via_parent);
+        for next in head.blocked_by.iter().chain(parent) {
+            if walk(tree, next, to, via_parent, seen, path) {
                 return true;
             }
         }
@@ -1385,6 +1452,41 @@ mod tests {
             if slug == "a" && path == vec!["a"]));
     }
 
+    /// §4.9 without touching `blocked_by`: "b turns out to belong under a" after
+    /// "a is gated on b" is the same loop, so `reparent` has to check it too.
+    #[test]
+    fn reparent_rejects_adopting_a_head_that_blocks_it() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "b", None);
+        link(&mut t, "a", "b", false).unwrap();
+
+        let err = rejects(&mut t, |t| reparent(t, "b", Some("a")));
+        assert!(matches!(err, Error::ReopenCycle { slug, edge, other, path }
+            if slug == "b"
+                && edge == Edge::Parent
+                && other == "a"
+                && path == vec!["b", "a", "b"]));
+    }
+
+    /// The converse again: a head moving *under* the head it is gated on is the
+    /// benign direction, and common — `graph-shape blocked_by consumption-surface`
+    /// in §3's own file shape is exactly this.
+    #[test]
+    fn reparent_accepts_adopting_a_head_it_is_gated_on() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "b", None);
+        link(&mut t, "b", "a", false).unwrap();
+
+        reparent(&mut t, "b", Some("a")).unwrap();
+        assert_eq!(t.heads["b"].parent.as_deref(), Some("a"));
+
+        answer(&mut t, "a");
+        answer(&mut t, "b");
+        assert_eq!(reanswer(&mut t, "a"), vec!["b"]);
+    }
+
     #[test]
     fn reparent_rejects_an_unknown_parent() {
         let mut t = tree();
@@ -1434,6 +1536,127 @@ mod tests {
         // never ready — is reachable anyway by forcing a two-head cycle.
         link(&mut t, "a", "a", true).unwrap();
         assert_eq!(t.heads["a"].blocked_by, vec!["a".to_string()]);
+    }
+
+    /// §4.9. The reopen relation is `X → children(X) ∪ {Y : Y blocked_by X}`, so
+    /// gating a head on its own descendant closes a loop across the two kinds:
+    /// re-answering `a` reopens `b`, answering `b` reopens `a`, forever, and the
+    /// tree can never reach done.
+    #[test]
+    fn link_rejects_gating_a_head_on_its_own_descendant() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "b", Some("a"));
+
+        let err = rejects(&mut t, |t| link(t, "a", "b", false));
+        assert!(matches!(err, Error::ReopenCycle { slug, edge, other, path }
+            if slug == "a"
+                && edge == Edge::BlockedBy
+                && other == "b"
+                && path == vec!["a", "b", "a"]));
+    }
+
+    #[test]
+    fn link_rejects_gating_a_head_on_a_grandchild() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "b", Some("a"));
+        add(&mut t, "c", Some("b"));
+
+        let err = rejects(&mut t, |t| link(t, "a", "c", false));
+        assert!(
+            matches!(err, Error::ReopenCycle { slug, other, path, .. }
+            if slug == "a" && other == "c" && path == vec!["a", "c", "b", "a"]),
+            "the path walks back up the ancestry that closes the loop"
+        );
+    }
+
+    #[test]
+    fn force_links_a_reopen_cycle() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "b", Some("a"));
+        link(&mut t, "a", "b", true).unwrap();
+        assert_eq!(t.heads["a"].blocked_by, vec!["b".to_string()]);
+    }
+
+    /// The converse direction is the benign one and must stay legal: with `c`
+    /// gated on its own ancestor, both the parent edge and the `blocked_by` edge
+    /// push staleness the same way — down — so there is no loop. It is also
+    /// load-bearing, since §2 derives `blocked` from `blocked_by` alone: a child
+    /// is *not* blocked by its parent unless the edge says so.
+    #[test]
+    fn link_accepts_gating_a_head_on_its_ancestor() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "b", Some("a"));
+        add(&mut t, "c", Some("b"));
+        link(&mut t, "c", "a", false).unwrap();
+
+        for slug in ["a", "b", "c"] {
+            answer(&mut t, slug);
+        }
+        assert_eq!(
+            reanswer(&mut t, "a"),
+            vec!["b", "c"],
+            "each descendant is reopened once and nothing reopens a"
+        );
+        assert_eq!(t.heads["a"].status, Status::Answered);
+    }
+
+    /// The whole point of the edge kind per §2 — a real decision gated on an
+    /// answer in another branch — so the §4.9 walk must not be so broad as to
+    /// refuse it.
+    #[test]
+    fn link_accepts_a_cross_branch_edge() {
+        let mut t = tree();
+        add(&mut t, "root", None);
+        add(&mut t, "graph-shape", Some("root"));
+        add(&mut t, "head-schema", Some("graph-shape"));
+        add(&mut t, "storage-format", Some("root"));
+        add(&mut t, "write-model", Some("storage-format"));
+
+        link(&mut t, "write-model", "head-schema", false).unwrap();
+        assert_eq!(
+            t.heads["write-model"].blocked_by,
+            vec!["head-schema".to_string()]
+        );
+    }
+
+    /// `sprout` needs no §4.9 check for the same reason it needs no `--force`:
+    /// every reopen edge into a brand-new head is inbound. Nothing can be
+    /// `blocked_by` it and it has no children, so it has no outgoing edge to
+    /// close a loop with, however its own `--parent` and `--blocked-by` overlap.
+    #[test]
+    fn sprout_cannot_cycle_the_reopen_cascade() {
+        let mut t = tree();
+        add(&mut t, "a", None);
+        add(&mut t, "kid", Some("a"));
+
+        for (slug, blocked_by) in [("gated-on-parent", "a"), ("gated-on-sibling", "kid")] {
+            sprout(
+                &mut t,
+                Sprout {
+                    question: "q?",
+                    parent: Some("a"),
+                    blocked_by: &[blocked_by],
+                    slug: Some(slug),
+                },
+            )
+            .unwrap();
+        }
+        // In gate order: §4.5 still holds, which is itself the sign that these
+        // edges point the way round that lets the tree be finished.
+        for slug in ["a", "kid", "gated-on-parent", "gated-on-sibling"] {
+            answer(&mut t, slug);
+        }
+
+        assert_eq!(
+            reanswer(&mut t, "a"),
+            vec!["gated-on-parent", "gated-on-sibling", "kid"],
+            "the cascade fans out and stops"
+        );
+        assert_eq!(t.heads["a"].status, Status::Answered);
     }
 
     #[test]

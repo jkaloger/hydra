@@ -7,7 +7,7 @@ pub mod render;
 pub mod slug;
 pub mod store;
 
-pub use graph::{CAUTERISED, Cauterise, Cut, Sprout};
+pub use graph::{CAUTERISED, Cauterise, Cut, Edge, Sprout};
 pub use grill::Lease;
 pub use hook::{Payload, Response};
 pub use model::{Answer, Head, Rejected, Status, Tree};
@@ -93,6 +93,24 @@ pub enum Error {
         slug: String,
         parent: String,
         /// The ancestry that would close the loop, from `slug` down to `parent`.
+        path: Vec<String>,
+    },
+
+    /// §4.9. Forceable on `link`, where §4.3 is forceable too; `reparent` has no
+    /// `--force` in §5, so there it is absolute.
+    ///
+    /// §4.3 and §4.4 each check one edge kind in isolation, but the reopen
+    /// cascade walks the *union* of the two, so an edge that closes no cycle in
+    /// either kind alone can still close one across them. A tree that can never
+    /// reach `done` is the silent, durable corruption §4 exists to refuse.
+    #[error("head '{slug}': {edge} '{other}' would cycle the reopen cascade: {}", path.join(" -> "))]
+    ReopenCycle {
+        slug: String,
+        /// Which edge was being added.
+        edge: Edge,
+        /// The other end of it: the blocker, or the new parent.
+        other: String,
+        /// The cycle the edge would close, from `slug` back round to `slug`.
         path: Vec<String>,
     },
 

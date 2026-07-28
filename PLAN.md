@@ -18,7 +18,9 @@ src/
 ├── hook.rs           Claude Code hook payloads + gating (§6, §9)
 ├── grill.rs          session lease (§6)
 └── main.rs           clap surface (§5)
-hydra-plugin/
+hydra-plugin/         the §6 plugin: manifest, skill, hooks.json
+scripts/smoke.sh      the CLI's only coverage (§8 excludes it from unit tests)
+README.md
 ```
 
 ## Iterations

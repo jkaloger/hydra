@@ -954,8 +954,8 @@ fn code(err: &hydra::Error) -> i32 {
         | Error::TreeExists { .. }
         | Error::UnsupportedVersion { .. } => exit::NO_TREE,
 
-        // §4's eight rejections, plus naming a head that is not there — the same
-        // class of mistake, told apart from a missing *tree* because the fix is
+        // §4's rejections, plus naming a head that is not there — the same class
+        // of mistake, told apart from a missing *tree* because the fix is
         // different: check the slug, not the store.
         Error::MalformedSlug { .. }
         | Error::DuplicateSlug { .. }
@@ -964,6 +964,7 @@ fn code(err: &hydra::Error) -> i32 {
         | Error::UnknownBlocker { .. }
         | Error::BlockCycle { .. }
         | Error::ParentCycle { .. }
+        | Error::ReopenCycle { .. }
         | Error::BlockedCut { .. }
         | Error::IllegalTransition { .. }
         | Error::CauteriseByUnanswered { .. }

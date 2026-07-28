@@ -207,11 +207,17 @@ fn session_start(store: Option<&Store>, payload: &Payload) -> Response {
     }
 }
 
-/// §6: `hydra: 6 open heads on 'hydra-design' — /hydra to resume`.
+/// §6: `hydra: 6 open heads on 'hydra-design' — /hydra:hydra to resume`.
 ///
 /// A `systemMessage` and not `additionalContext`: the line ends by telling
-/// somebody to type `/hydra`, and §6 spells `additionalContext` out on the row
-/// where it does mean the model.
+/// somebody to type `/hydra:hydra`, and §6 spells `additionalContext` out on the
+/// row where it does mean the model.
+///
+/// `plugin:skill` in full, both halves, because Claude Code namespaces a plugin's
+/// skills and does not collapse the case where the two names happen to match
+/// (§6). A bare `/hydra` is not a command anyone has, and this line is the only
+/// place a user is ever told which one to type — get it wrong and hydra's one
+/// entry point looks broken on first contact.
 fn open_heads_notice(tree: &Tree) -> Response {
     let counts = query::status(tree);
     if counts.open == 0 {
@@ -219,7 +225,7 @@ fn open_heads_notice(tree: &Tree) -> Response {
     }
     Response {
         system_message: Some(format!(
-            "hydra: {} open head{} on '{}' — /hydra to resume",
+            "hydra: {} open head{} on '{}' — /hydra:hydra to resume",
             counts.open,
             plural(counts.open),
             tree.slug
@@ -580,7 +586,7 @@ mod tests {
     fn session_start_announces_open_heads_on_startup_and_resume() {
         let (_root, store) = store();
         let expected =
-            r#"{"systemMessage":"hydra: 1 open head on 'hydra-design' — /hydra to resume"}"#;
+            r#"{"systemMessage":"hydra: 1 open head on 'hydra-design' — /hydra:hydra to resume"}"#;
         assert_eq!(
             json(&store, Event::SessionStart, &session_start("startup")),
             expected
@@ -598,8 +604,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             json(&store, Event::SessionStart, &session_start("startup")),
-            r#"{"systemMessage":"hydra: 2 open heads on 'hydra-design' — /hydra to resume"}"#,
-            "§6's example is plural; one head is not"
+            r#"{"systemMessage":"hydra: 2 open heads on 'hydra-design' — /hydra:hydra to resume"}"#,
+            "§6's example is plural; one head is not, and the skill is addressed \
+             `plugin:skill` even when the two names match — a bare `/hydra` is not \
+             a command anyone has"
         );
     }
 

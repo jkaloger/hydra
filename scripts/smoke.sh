@@ -363,6 +363,84 @@ run 3 link lifecycle --blocked-by ghost
 err_has "ghost"
 
 echo
+echo "== §4.9: an edge whose reopen cascade would cycle (exit 3, forceable on link)"
+# In the empty `nested` tree, so the frontier of `hydra-design` is left alone: the
+# only way to show this one is to drive a tree to done twice.
+run 0 use nested
+run 0 sprout --question "parent?" --slug wedge-a
+run 0 sprout --question "child?" --parent wedge-a --slug wedge-b
+run 0 sprout --question "grandchild?" --parent wedge-b --slug wedge-c
+run 0 sprout --question "elsewhere?" --slug wedge-d
+
+echo "-- gating a head on its own child: cutting either would reopen the other"
+run 3 link wedge-a --blocked-by wedge-b
+stdout_empty
+err_has "wedge-a -> wedge-b -> wedge-a"
+run 0 show wedge-a
+jqok '.blocked_by == []'
+
+echo "-- and on a grandchild: the walk climbs the ancestry to find the loop"
+run 3 link wedge-a --blocked-by wedge-c
+stdout_empty
+err_has "wedge-a -> wedge-c -> wedge-b -> wedge-a"
+
+echo "-- the converse direction is the benign one, and is the point of §2's cross edge"
+run 0 link wedge-c --blocked-by wedge-a
+run 0 link wedge-d --blocked-by wedge-a
+
+echo "-- reparent closes the same loop with no blocked_by write at all"
+run 3 reparent wedge-a --parent wedge-d
+stdout_empty
+err_has "wedge-a -> wedge-d -> wedge-a"
+run 0 show wedge-a
+jqok '.parent == null'
+
+echo "-- a first answer never cascades, so the frontier drains either way"
+for _ in $(seq 1 8); do
+  slug="$("$BIN" next | jq -r '.slug // empty')"
+  [ -n "$slug" ] || break
+  run 0 cut "$slug" --answer "settled: $slug"
+done
+run 0 status
+jqok '.done == true'
+
+echo "-- re-answering the root cascades down and stops: this is what §4.9 protects"
+run 0 cut wedge-a --answer "revised"
+jqok '.reopened == ["wedge-b", "wedge-c", "wedge-d"]'
+for _ in $(seq 1 12); do
+  slug="$("$BIN" next | jq -r '.slug // empty')"
+  [ -n "$slug" ] || break
+  run 0 cut "$slug" --answer "re-settled: $slug"
+done
+run 0 status
+jqok '.done == true and .open == 0'
+
+echo "-- forced, the edge lands and records nothing: if you force it, you own it"
+run 0 link wedge-a --blocked-by wedge-b --force
+run 0 show wedge-a
+jqok '.blocked_by == ["wedge-b"]'
+echo "   and now the same loop ping-pongs: 12 cuts, still not done"
+run 0 cut wedge-b --answer "revised again"
+for _ in $(seq 1 12); do
+  slug="$("$BIN" next | jq -r '.slug // empty')"
+  [ -n "$slug" ] || break
+  run 0 cut "$slug" --answer "re-settled: $slug"
+done
+run 4 status
+jqok '.done == false'
+
+echo "-- unlink is the way back out, and then it finishes"
+run 0 unlink wedge-a --blocked-by wedge-b
+for _ in $(seq 1 12); do
+  slug="$("$BIN" next | jq -r '.slug // empty')"
+  [ -n "$slug" ] || break
+  run 0 cut "$slug" --answer "re-settled: $slug"
+done
+run 0 status
+jqok '.done == true'
+run 0 use hydra-design
+
+echo
 echo "== tree is for eyes, not for jq (all four glyphs are on the board here)"
 echo "+ hydra tree"
 "$BIN" tree >"$OUT" 2>"$ERR"
@@ -527,7 +605,7 @@ echo "== hook session-start: one verb, two of §6's rows, split on \`source\`"
 IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}"
 run 0 hook session-start
 hook_wellformed
-jqok '.systemMessage | test("^hydra: [0-9]+ open heads on .hydra-design. . /hydra to resume$")'
+jqok '.systemMessage | test("^hydra: [0-9]+ open heads on .hydra-design. . /hydra:hydra to resume$")'
 jqok 'has("hookSpecificOutput") == false and has("decision") == false'
 echo "-- resume is the same row as startup"
 IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"resume\"}"
@@ -748,6 +826,150 @@ echo "-- but §6 gates the compact reload on the lease alone, so the record stil
 IN="{\"session_id\":\"$SESSION\",\"hook_event_name\":\"SessionStart\",\"source\":\"compact\"}"
 run 0 hook session-start
 jqok '(.hookSpecificOutput.additionalContext | sub("^[^{]*"; "") | fromjson | .counts.done) == true'
+
+echo
+echo "== hydra-plugin: the wiring of §6, parsed out of hooks.json and executed"
+# The plugin ships zero scripts (§6), so its `hooks.json` command strings are the
+# whole contract between the plugin and this binary. That makes them the one part
+# of the plugin testable from here: parse each one out with `jq` and run it. A
+# renamed verb still exits 0 and still prints one JSON object — `hook` is built
+# that way on purpose — so what fails here is the *gate*, which stops firing.
+readonly PLUGIN="$ROOT/hydra-plugin"
+readonly MANIFEST="$PLUGIN/.claude-plugin/plugin.json"
+readonly HOOKS="$PLUGIN/hooks/hooks.json"
+readonly SKILL="$PLUGIN/skills/hydra/SKILL.md"
+
+echo "-- §6's three files and nothing else"
+same "$(cd "$PLUGIN" && find . -type f | sort | tr '\n' ' ')" \
+  "./.claude-plugin/plugin.json ./hooks/hooks.json ./skills/hydra/SKILL.md " \
+  "the plugin's file list"
+
+echo "+ jq . plugin.json"
+jq -e '.name == "hydra"' "$MANIFEST" >/dev/null || fail "plugin.json should parse and name itself"
+# No manifest field declares a binary as a prerequisite, so the description is
+# where a user finds out they need one.
+jq -e '.description | test("hydra` binary")' "$MANIFEST" >/dev/null \
+  || fail "plugin.json should name the binary prerequisite"
+
+echo "+ head -3 skills/hydra/SKILL.md"
+grep -qx 'name: hydra' "$SKILL" || fail "the skill must be named hydra (§6)"
+grep -q '^description: ' "$SKILL" || fail "the skill needs a description to trigger on"
+
+echo "+ jq . hooks/hooks.json"
+# Claude Code parses this file as `{description?, hooks}` and takes `.hooks`, so
+# an unwrapped event map is discarded silently and the plugin does nothing at all.
+jq -e 'has("hooks") and (.hooks | type == "object")' "$HOOKS" >/dev/null \
+  || fail "hooks.json needs the plugin wrapper: {\"hooks\": {...}}"
+jq -e '[.hooks | keys[]] == ["PostToolUse", "SessionStart", "Stop"]' "$HOOKS" >/dev/null \
+  || fail "hooks.json should wire exactly §6's three events"
+jq -e '[.hooks[][]] | length == 3' "$HOOKS" >/dev/null \
+  || fail "one matcher row per event"
+jq -e 'all(.hooks[][].hooks[]; .type == "command" and (.command | startswith("hydra hook ")))' \
+  "$HOOKS" >/dev/null || fail "every hook shells straight to \`hydra hook <event>\` (§9)"
+# Below the default and a hook that has work to do gets killed mid-answer.
+jq -e 'all(.hooks[][].hooks[]; has("timeout") == false)' "$HOOKS" >/dev/null \
+  || fail "no timeout: the default is the contract"
+echo "-- one SessionStart row covers both of §6's rows: \`hydra hook session-start\`"
+echo "   branches on the payload's \`source\` itself, in tested Rust"
+jq -e '.hooks.SessionStart[0].matcher == "startup|resume|compact|clear"' "$HOOKS" >/dev/null \
+  || fail "the SessionStart matcher should carry all four sources §6 names"
+echo "-- but never \`fork\`: a fork gets a new session_id, so the lease cannot match"
+jq -e '.hooks.SessionStart[0].matcher | contains("fork") == false' "$HOOKS" >/dev/null \
+  || fail "fork is a source hydra no-ops on"
+jq -e '.hooks.PostToolUse[0].matcher == "Bash"' "$HOOKS" >/dev/null \
+  || fail "§6 gives PostToolUse a Bash matcher"
+jq -e '.hooks.Stop[0] | has("matcher") == false' "$HOOKS" >/dev/null \
+  || fail "§6's Stop row has no matcher"
+
+echo "-- and now run each command string as Claude Code would: a shell, a payload"
+echo "   on stdin, \`hydra\` resolved off PATH"
+mkdir -p "$WORK/bin" "$WORK/plugin-repo"
+ln -sf "$BIN" "$WORK/bin/hydra"
+readonly PLUGIN_SESSION="plugin-session-1"
+(
+  cd "$WORK/plugin-repo"
+  "$BIN" init >/dev/null
+  "$BIN" sprout --question "Does the wiring hold?" --slug wiring >/dev/null
+  "$BIN" sprout --question "Is it still wired?" --parent wiring --slug still-wired >/dev/null
+  "$BIN" cut wiring --answer "yes, and this is the answer the render shows" >/dev/null
+  "$BIN" grill start --session-id "$PLUGIN_SESSION" >/dev/null
+) || fail "could not build the scratch store for the plugin's hooks"
+
+# One payload per event, carrying everything §6's gate for that row reads.
+hook_payload() {
+  case "$1" in
+    SessionStart)
+      printf '{"session_id":"%s","hook_event_name":"SessionStart","source":"startup"}' \
+        "$PLUGIN_SESSION" ;;
+    PostToolUse)
+      printf '{"session_id":"%s","hook_event_name":"PostToolUse","tool_name":"Bash",' \
+        "$PLUGIN_SESSION"
+      printf '"tool_input":{"command":"hydra cut wiring --answer x"}}' ;;
+    Stop)
+      printf '{"session_id":"%s","hook_event_name":"Stop","stop_hook_active":false}' \
+        "$PLUGIN_SESSION" ;;
+    *) fail "hooks.json declares an event this script has no payload for: $1" ;;
+  esac
+}
+
+while IFS=$'\t' read -r event command; do
+  echo "+ [$event] $command"
+  STEP="hooks.json [$event] $command"
+  code=0
+  hook_payload "$event" | (
+    cd "$WORK/plugin-repo"
+    export PATH="$WORK/bin:$PATH"
+    eval "$command"
+  ) >"$OUT" 2>"$ERR" || code=$?
+  [ "$code" -eq 0 ] || fail "a hook must exit 0, got $code"
+  hook_wellformed
+  # The gate. This is what a renamed verb breaks: `hydra hook <unknown>` is a
+  # well-formed `{}` and exit 0, so only the gate not firing gives it away.
+  case "$event" in
+    # `/hydra:hydra`, both halves: Claude Code addresses a plugin's skill
+    # `plugin:skill` and does not collapse the case where the names match, and this
+    # line is the only place a user is told what to type.
+    SessionStart) jqok '.systemMessage | test("^hydra: 1 open head on .plugin-repo. . /hydra:hydra to resume$")' ;;
+    PostToolUse) jqok '.systemMessage | startswith("plugin-repo  (1 answered, 1 open)")' ;;
+    Stop) jqok '.decision == "block" and (.reason | contains("still-wired"))' ;;
+  esac
+done < <(jq -r '.hooks | to_entries[] as $e | $e.value[].hooks[]
+                | [$e.key, .command] | @tsv' "$HOOKS")
+
+# The `2>/dev/null || true` on each command string, and the only place it is
+# written down: §6 ships the binary as a *separate* prerequisite, so a plugin
+# installed without it would report `command not found` in every project the user
+# opens. Worse on `Stop`, where Claude Code reads exit 2 as *block* whatever is on
+# stdout — so a missing binary would become a shell error refusing to end the
+# turn. `hydra hook` exits 0 and writes nothing to stderr by design (see
+# `HOOKS_ALWAYS_SUCCEED`), so the guard costs an installed hydra nothing.
+echo "-- the guard on each command string is for the missing binary, not for a"
+echo "   failing one: a plugin installed without it must stay silent rather than"
+echo "   report it everywhere, and on Stop a nonzero exit is a refusal to stop"
+mkdir -p "$WORK/empty-bin"
+# Read out before PATH goes away: `jq` would not be findable afterwards either.
+COMMANDS=()
+while IFS= read -r command; do
+  COMMANDS+=("$command")
+done < <(jq -r '.hooks[][].hooks[].command' "$HOOKS")
+for command in "${COMMANDS[@]}"; do
+  STEP="hooks.json with no hydra on PATH: $command"
+  echo "+ PATH=(empty) $command"
+  code=0
+  (
+    cd "$WORK/plugin-repo"
+    # Emptying the search path is the whole point: this is the repo where hydra
+    # was never installed. Scoped to the subshell.
+    # shellcheck disable=SC2123
+    PATH="$WORK/empty-bin"
+    printf '{}' | eval "$command"
+  ) >"$OUT" 2>"$ERR" || code=$?
+  [ "$code" -eq 0 ] || fail "expected exit 0 with no binary to run, got $code"
+  stderr_empty
+  [ ! -s "$OUT" ] || fail "nothing to say, so nothing on stdout"
+done
+
+(cd "$WORK/plugin-repo" && "$BIN" grill stop >/dev/null)
 
 echo
 echo "== the stored file is still the shape §3 asks for"

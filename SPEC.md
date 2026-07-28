@@ -169,8 +169,13 @@ Rejected at write:
 6. Illegal transition. Only `open → answered` (cut, cauterise) and `answered → open` (cascade, explicit reopen).
 7. `cauterise --by` pointing at an unanswered head.
 8. Duplicate or malformed slug.
+9. An edge — `blocked_by` or `parent` — that would create a cycle in the cascade relation.
 
-Every rejection exits nonzero with a message naming the offending slugs. `--force` exists for 3, 5 and 7 only, and records nothing — if you force it, you own it.
+9 is subtler than 3 and was found the hard way. The cascade walks `children ∪ blocked_by` as one relation (§2), so gating an ancestor on its own descendant closes a cycle across the union even though `blocked_by` alone stays acyclic: re-answering either head reopens the other, forever. `status` never leaves nonzero, `next` never returns null, and the `Stop` hook (§6) keeps refusing to end the turn. A tree that can never reach done is the silent durable corruption this section exists to refuse.
+
+Only one direction is a cycle. A `blocked_by` edge contributes `blocker → dependent`, the reverse of the dependency arrow, while a parent pointer contributes `parent → child`. So gating a head on its *ancestor* pushes staleness downward exactly as the tree does and stays legal — §3's own file shape does it. Gating on a descendant closes the loop. `reparent` reaches the same shape with no `blocked_by` write at all, by adopting a head that already blocks the new parent, so it is checked there too; §4.4 doesn't catch that, since the new parent needn't be a descendant. `sprout` needs no check: every cascade edge touching a brand-new head points inward, and a head that didn't exist a moment ago has neither children nor dependents.
+
+Every rejection exits nonzero with a message naming the offending slugs. `--force` exists for 3, 5, 7 and 9 only, and records nothing — if you force it, you own it. On 9 it covers `link` alone: §5 gives `reparent` no `--force`, and `link --force` is already the deliberate path to the shape.
 
 Every mutation echoes the tree it wrote to, so a stale `HEAD` surfaces immediately.
 
@@ -261,7 +266,7 @@ The plugin declares the `hydra` binary as a prerequisite. The skill checks `comm
 
 ### Skill
 
-Named `hydra`. Owns the interview protocol:
+Named `hydra`, invoked as `/hydra:hydra` — Claude Code namespaces plugin skills `plugin:skill`, and the degenerate case where the two names match is not collapsed. Owns the interview protocol:
 
 ```
 resume            skeleton + hydrated ancestry
@@ -282,7 +287,7 @@ Each entry in `hooks.json` shells to `hydra hook <event>` — no scripts, no `jq
 
 | Event          | Matcher           | Gate                             | Behaviour                                                            |
 | -------------- | ----------------- | -------------------------------- | -------------------------------------------------------------------- |
-| `SessionStart` | `startup\|resume` | HEAD tree has open heads         | one line: `hydra: 6 open heads on 'hydra-design' — /hydra to resume` |
+| `SessionStart` | `startup\|resume` | HEAD tree has open heads         | one line: `hydra: 6 open heads on 'hydra-design' — /hydra:hydra to resume` |
 | `SessionStart` | `compact\|clear`  | grill lease matches `session_id` | full `hydra resume` into `additionalContext`                         |
 | `PostToolUse`  | `Bash`            | command contains `hydra `        | `systemMessage` renders `hydra tree` to the user                     |
 | `Stop`         | —                 | grill lease matches `session_id` | `decision: "block"` + inject `hydra next`                            |
