@@ -2,3 +2,4 @@
 
 # Session state, not decisions (SPEC §3).
 .hydra/*.lock
+.hydra/HEAD
