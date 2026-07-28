@@ -223,6 +223,7 @@ hydra tree                               ASCII render
 ```
 hydra grill start                        take the session lease
 hydra grill stop                         release it
+hydra hook <event>                       read hook JSON on stdin, emit hook JSON on stdout (§9)
 ```
 
 ### `hydra tree`
@@ -276,6 +277,8 @@ The skill also runs `hydra grill start` as its first act.
 ### Hooks
 
 Plugin hooks fire in every project once installed, so gating is load-bearing, not polish.
+
+Each entry in `hooks.json` shells to `hydra hook <event>` — no scripts, no `jq`, gating logic in tested Rust. See §9.
 
 | Event          | Matcher           | Gate                             | Behaviour                                                            |
 | -------------- | ----------------- | -------------------------------- | -------------------------------------------------------------------- |
@@ -334,7 +337,64 @@ The CLI and its output shapes are not covered. Known consequence: renaming a JSO
 
 ---
 
-## 9. Assumptions and open questions
+## 9. Dependencies
+
+Versions are resolved at `cargo add` time, not pinned here.
+
+### Core lib
+
+| Crate | Why | Notes |
+| --- | --- | --- |
+| `serde` (derive) | Model ↔ JSON | |
+| `serde_json` | The storage format | `Map` is a `BTreeMap` by default, so **sorted keys come free** — do *not* enable `preserve_order`, it swaps in `IndexMap` and breaks the stable-diff property from §3 |
+| `ulid` | Head identity (§2) | Has a `serde` feature. Rules out `uuid` |
+| `jiff` | RFC 3339 timestamps | Modern, sane API, good serde support. `time` is the conservative alternative; `chrono` is not worth its surface |
+| `thiserror` | Typed error enum, one variant per invariant in §4 | Lets rejections name offending slugs structurally rather than as formatted strings |
+| `tempfile` | Atomic write via `NamedTempFile::persist` | Must be created in the same directory as the target or `persist` crosses a filesystem boundary and stops being atomic |
+| `fs4` | Advisory lock on the tree file | See concurrency note below |
+
+### CLI
+
+| Crate | Why |
+| --- | --- |
+| `clap` (derive) | Verb surface in §5 |
+| `anyhow` | Top-level error reporting; core lib keeps `thiserror` |
+
+### Dev
+
+Std `#[test]` only, per §8. No `insta`, no `proptest`, no `assert_cmd` — those were considered and rejected with the testing scope.
+
+### Deliberately absent
+
+- **`regex`** — slug validation (`^[a-z0-9][a-z0-9-]*$`) is a dozen lines of `char` checks. Not worth the compile time.
+- **`uuid`** — `ulid` covers identity and sorts lexicographically by time.
+- **`petgraph`** — the graph is a `HashMap<Slug, Head>` with parent pointers. Cycle detection and transitive closure over a few hundred nodes are short hand-written walks; a graph library would cost an index to keep in sync with the JSON, which is exactly the desync §3 avoids.
+- **`indexmap`** — see the `serde_json` note.
+- **`jq`** — see below.
+
+### `hydra hook <event>`
+
+The hook scripts in §6 need to read hook JSON from stdin, extract `session_id`, compare it against the lease, and emit hook JSON on stdout. Written as shell that means a hard dependency on `jq` and a pile of untested bash inside the plugin.
+
+Instead the plugin's `hooks.json` shells straight to the binary:
+
+```
+hydra hook session-start
+hydra hook post-tool-use
+hydra hook stop
+```
+
+Hydra parses the hook payload on stdin and writes the `hookSpecificOutput` envelope on stdout. Gating logic lives in Rust, under the same unit tests as everything else, and the plugin ships zero scripts. No `jq`, no bash.
+
+This keeps the core CLI harness-agnostic in the sense that matters — `hook` is one more subcommand that happens to speak Claude Code's JSON, not a coupling of the model or storage layers.
+
+### Concurrency
+
+Not previously covered. Two agents in one repo can interleave a read-modify-write and silently lose an answer. `fs4` advisory-locks the tree file for the read-modify-write span; contention is near zero in practice, so a blocking lock with a short timeout is enough.
+
+---
+
+## 10. Assumptions and open questions
 
 Taken as recommended, not explicitly ratified:
 

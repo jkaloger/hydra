@@ -1,0 +1,15 @@
+[package]
+name = "hydra"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = "4.6.4"
+fs4 = "1.1.0"
+jiff = "0.2.35"
+serde = "1.0.229"
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+thiserror = "2.0.19"
+ulid = "3.0.0"
