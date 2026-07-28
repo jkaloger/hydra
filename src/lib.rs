@@ -1,4 +1,6 @@
 pub mod graph;
+pub mod grill;
+pub mod hook;
 pub mod model;
 pub mod query;
 pub mod render;
@@ -6,6 +8,8 @@ pub mod slug;
 pub mod store;
 
 pub use graph::{CAUTERISED, Cauterise, Cut, Sprout};
+pub use grill::Lease;
+pub use hook::{Payload, Response};
 pub use model::{Answer, Head, Rejected, Status, Tree};
 pub use query::{Counts, Detail, Resume, Skeleton, State, Visit};
 pub use render::render;

@@ -289,6 +289,8 @@ Each entry in `hooks.json` shells to `hydra hook <event>` — no scripts, no `jq
 
 The `compact` gate matters most. Context death by compaction is far more common than actual session death, and that hook is what makes hydra reload itself without the model needing to realise it forgot.
 
+The `clear` half of that row is dead as written, and the lease is why: `/clear` starts a new session with a new `session_id`, so a lease taken before it can never match afterwards. `source: "clear"` also misses the `startup|resume` matcher, so hydra says nothing at all across a `/clear`. Compaction keeps the same session, so the load-bearing half works. Recovery is the skill's: re-run `hydra grill start` when it wakes, which re-leases under the new id.
+
 `PostToolUse` self-gates on the command string — only a grilling session runs `hydra cut` — so it needs no lease.
 
 ### The lease

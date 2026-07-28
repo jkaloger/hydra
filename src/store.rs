@@ -13,6 +13,7 @@ use crate::{Error, Result, slug};
 
 pub const DIR: &str = ".hydra";
 pub const HEAD: &str = "HEAD";
+pub const GRILL: &str = "grill";
 
 /// §9 calls for a blocking lock with a short timeout: contention is a second
 /// agent in the same repo, not a thundering herd.
@@ -73,6 +74,12 @@ impl Store {
 
     pub fn head_path(&self) -> PathBuf {
         self.dir.join(HEAD)
+    }
+
+    /// §3's session lease, which `grill` owns. Session state, so it is
+    /// gitignored, and `trees` already knows it is not a tree.
+    pub fn grill_path(&self) -> PathBuf {
+        self.dir.join(GRILL)
     }
 
     /// The sidecar the read-modify-write lock is taken on. Deliberately *not*
@@ -201,7 +208,9 @@ impl Store {
         Ok(tree)
     }
 
-    fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+    /// Crate-private: `.hydra/` is this module's layout, and the one other
+    /// writer in the crate is `grill`, whose lease lives in it.
+    pub(crate) fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         // The temp file must live in the target's directory: `persist` is a
         // rename, and a rename across filesystems is not atomic (§9).
         let mut tmp = NamedTempFile::new_in(&self.dir).map_err(Error::io(&self.dir))?;
