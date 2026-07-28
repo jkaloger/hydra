@@ -61,9 +61,66 @@ impl Head {
     /// closure touched, so `rev` and `prior` have to be owned next to the field
     /// they track rather than remembered at each of §5's eight mutations.
     pub fn set_answer(&mut self, answer: Answer) {
-        self.prior = self.answer.replace(answer);
+        // Only a superseded answer displaces `prior`. Cutting a head that
+        // `reopen` already emptied must not overwrite the answer `reopen` put
+        // there: §3 says `prior` is the most recent superseded answer, and after
+        // reopen-then-cut that is still the one from before the reopen.
+        if let Some(superseded) = self.answer.replace(answer) {
+            self.prior = Some(superseded);
+        }
         self.status = Status::Answered;
         self.rev += 1;
+        self.touch();
+    }
+
+    /// The `answered → open` half of §2's lifecycle, for both an explicit
+    /// `reopen` and a cascade. The answer moves to `prior` rather than being
+    /// dropped — that retained context is what makes re-answering one word.
+    ///
+    /// Hydra's convention, not something §2 settles: `rev` counts answers given,
+    /// so a withdrawal does not move it. §2's "bumped when its answer changes"
+    /// reads either way — emptying the field is a change — but a head reopened
+    /// five times by upstream churn and never re-answered has not been revised
+    /// five times, and the withdrawal is already legible from `status` + `prior`.
+    ///
+    /// Returns whether anything changed, so a cascade over already-open heads
+    /// reports only the ones it actually reopened. Either marker of answeredness
+    /// is enough to act on: gating on `answer` alone would let a hand-edited
+    /// `{status: "answered", answer: null}` head pass `graph::reopen`'s status
+    /// check and then stay answered.
+    pub fn reopen(&mut self) -> bool {
+        if self.status == Status::Open && self.answer.is_none() {
+            return false;
+        }
+        if let Some(superseded) = self.answer.take() {
+            self.prior = Some(superseded);
+        }
+        self.status = Status::Open;
+        self.touch();
+        true
+    }
+
+    pub fn set_question(&mut self, question: String) {
+        self.question = question;
+        self.touch();
+    }
+
+    /// `seq` is meaningless apart from the parent it orders under (§3), so the
+    /// two move together and a reparent cannot forget to re-seat the head in its
+    /// new sibling set.
+    pub fn set_parent(&mut self, parent: Option<String>, seq: u32) {
+        self.parent = parent;
+        self.seq = seq;
+        self.touch();
+    }
+
+    /// `blocked_by` is a set — §2 derives `blocked` from *any* member being open
+    /// — so it is stored sorted and deduplicated. Two trees with the same edges
+    /// then have the same bytes, which is §3's stable-diff property.
+    pub fn set_blocked_by(&mut self, mut blocked_by: Vec<String>) {
+        blocked_by.sort();
+        blocked_by.dedup();
+        self.blocked_by = blocked_by;
         self.touch();
     }
 }
@@ -73,6 +130,15 @@ impl Head {
 pub enum Status {
     Open,
     Answered,
+}
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Status::Open => "open",
+            Status::Answered => "answered",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
