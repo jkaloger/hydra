@@ -5,6 +5,9 @@
 <p align="center">
     Decision trees for AI-led design interviews.
 </p>
+<p align="center">
+  <a href="#license"><img alt="license: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg"></a>
+</p>
 
 ## Synopsis
 
@@ -194,3 +197,12 @@ scripts/smoke.sh        # the CLI's output shapes and the plugin's files
 ## See also
 
 [SPEC.md](SPEC.md) — model, storage format, invariants, plugin protocol.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
