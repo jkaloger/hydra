@@ -586,6 +586,29 @@ grep -q '^description: ' "$SKILL" || fail "the skill needs a description to trig
 # `plugin:skill` and does not collapse the case where the names match. The skill's
 # own description is now the only place a user is told what to type.
 grep -q '/hydra:hydra' "$SKILL" || fail "the skill should name itself /hydra:hydra"
+
+echo
+echo "== the marketplace that makes the plugin installable"
+# Claude Code only looks for a marketplace at the repo root, and a relative
+# `source` resolves against that root rather than against `.claude-plugin/`.
+readonly MARKETPLACE="$ROOT/.claude-plugin/marketplace.json"
+
+echo "+ jq . marketplace.json"
+jq -e '.name == "hydra"' "$MARKETPLACE" >/dev/null \
+  || fail "marketplace.json should parse and name itself"
+jq -e '.plugins == [.plugins[0]] and .plugins[0].name == "hydra"' "$MARKETPLACE" >/dev/null \
+  || fail "the marketplace should list the one plugin, named for /plugin install hydra@hydra"
+# The path is the whole point of the file: get it wrong and the install 404s
+# with the manifest still validating.
+same "$(jq -r '.plugins[0].source' "$MARKETPLACE")" "./claude-plugin" \
+  "the marketplace's plugin source"
+test -f "$ROOT/$(jq -r '.plugins[0].source' "$MARKETPLACE")/.claude-plugin/plugin.json" \
+  || fail "the source path should resolve from the repo root to a real manifest"
+
+echo "-- .claude/skills/hydra: the dogfood symlink, which a rename silently breaks"
+test -e "$ROOT/.claude/skills/hydra" \
+  || fail ".claude/skills/hydra is dangling; repoint it at claude-plugin/skills/hydra"
+
 echo
 echo "== the stored file is still the shape §3 asks for"
 # No pipes into `grep -q`: it exits at the first match, and under `pipefail` the

@@ -250,12 +250,15 @@ Colour when stdout is a terminal, and only then: glyph in its state's colour (an
 Distributed as a Claude Code plugin. Not a `hydra skills install` subcommand — the CLI stays harness-agnostic.
 
 ```
+.claude-plugin/marketplace.json    the repo is its own marketplace
 claude-plugin/
 ├── .claude-plugin/plugin.json
 └── skills/hydra/SKILL.md
 ```
 
 One skill and nothing else. No hooks: a plugin's hooks fire in every project it is installed in, and buying enforcement at that price is a bad trade — the failure modes land in sessions that never asked for hydra, and the enforcement they buy is a turn the model cannot end, which reads as the tool being broken.
+
+The marketplace lives at the repo root because that is the only place Claude Code looks for one, and its `source` is the relative path `./claude-plugin`, resolved against the marketplace root rather than against `.claude-plugin/`. Shipping it here is what makes `/plugin marketplace add jkaloger/hydra` enough; without it the plugin is reachable only as a `--plugin-dir` for one session.
 
 The plugin declares the `hydra` binary as a prerequisite. The skill checks `command -v hydra` and degrades to in-context interviewing if it's absent rather than dying.
 

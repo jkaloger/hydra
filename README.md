@@ -177,9 +177,15 @@ agent.
 claude --plugin-dir ./claude-plugin      # this session only
 ```
 
-For a persistent install, add a marketplace listing `claude-plugin/`, then
-`/plugin install hydra@<marketplace>`. `claude plugin validate ./claude-plugin`
-checks the manifest.
+The repo is its own marketplace, so a persistent install is two commands:
+
+```
+/plugin marketplace add jkaloger/hydra
+/plugin install hydra@hydra
+```
+
+`claude plugin validate ./claude-plugin --strict` checks the manifest;
+`claude plugin validate . --strict` checks the marketplace listing it.
 
 The plugin ships one skill, `/hydra:hydra`, the interview protocol — Claude Code
 addresses a plugin's skills as `plugin:skill` and does not collapse the case

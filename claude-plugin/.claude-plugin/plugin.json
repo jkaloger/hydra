@@ -1,12 +1,15 @@
 {
-  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "hydra",
   "version": "0.1.0",
   "author": {
     "name": "Jack Kaloger",
     "email": "jack.kaloger@inlight.com.au"
   },
-  "description": "AI-led design interviews over a durable decision tree. Prerequisite: the `hydra` binary on PATH (`cargo install --path .` from the hydra repo). Without it the skill degrades to in-context interviewing.",
+  "description": "AI-led design interviews over a durable decision tree. Prerequisite: the `hydra` binary on PATH (`cargo install --git https://github.com/jkaloger/hydra`). Without it the skill degrades to in-context interviewing.",
+  "homepage": "https://github.com/jkaloger/hydra",
+  "repository": "https://github.com/jkaloger/hydra",
+  "license": "MIT OR Apache-2.0",
   "keywords": [
     "design",
     "interview",

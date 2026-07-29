@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "hydra",
+  "description": "The hydra plugin: AI-led design interviews over a durable decision tree.",
+  "owner": {
+    "name": "Jack Kaloger"
+  },
+  "plugins": [
+    {
+      "name": "hydra",
+      "source": "./claude-plugin",
+      "description": "AI-led design interviews over a durable decision tree. Prerequisite: the `hydra` binary on PATH (`cargo install --git https://github.com/jkaloger/hydra`). Without it the skill degrades to in-context interviewing."
+    }
+  ]
+}

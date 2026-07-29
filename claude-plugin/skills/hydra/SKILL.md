@@ -1,6 +1,6 @@
 ---
 name: hydra
-description: Interview the user relentlessly about a plan or design. Use when the user wants to plan/design a system, break down a problem, asks an open question, or wants to continue from a previous interview.
+description: Interview the user relentlessly about a plan or design. Use when the user wants to plan/design a system, break down a problem, asks an open question, or wants to continue from a previous interview. Invoked directly as /hydra:hydra.
 ---
 
 # hydra — the interview protocol
