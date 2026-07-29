@@ -8,7 +8,7 @@ pub mod store;
 pub use graph::{CAUTERISED, Cauterise, Cut, Edge, Sprout};
 pub use model::{Answer, Head, Rejected, Status, Tree};
 pub use query::{Counts, Detail, Resume, Skeleton, State, Visit};
-pub use render::render;
+pub use render::{Colour, render};
 pub use store::Store;
 
 use std::io;

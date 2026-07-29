@@ -434,9 +434,11 @@ stderr_empty
 if jq -e . "$OUT" >/dev/null 2>&1; then fail "tree should not be JSON"; fi
 grep -q "hydra-design  (" "$OUT" || fail "tree should head with the tree name and counts"
 grep -q "← next" "$OUT" || fail "tree should mark next"
-grep -q "⊘ what-shape-is-the-resume-payload   cauterised by storage-format" "$OUT" \
+grep -qE "⊘ what-shape-is-the-resume-payload +cauterised by storage-format" "$OUT" \
   || fail "tree should show the cauterised head and its killer"
 grep -q "◌ " "$OUT" || fail "tree should show a blocked head"
+grep -q "└── " "$OUT" || fail "tree should draw connectors"
+if grep -q $'\x1b' "$OUT"; then fail "tree into a file should carry no ANSI"; fi
 sed 's/^/  /' "$OUT"
 
 echo

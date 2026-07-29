@@ -5,7 +5,7 @@
 //! exits nonzero while open heads remain (§5) and its counts are still the whole
 //! of stdout.
 
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 
 use anyhow::Context;
@@ -462,7 +462,7 @@ fn run(command: Command) -> anyhow::Result<i32> {
             // Not `print!`: `std::io::_print` panics on a write failure, and this
             // is the output most likely to be piped. `render` already ends in a
             // newline.
-            write_stdout(&render(&tree))?;
+            write_stdout(&render(&tree, colour()))?;
         }
     }
     Ok(exit::OK)
@@ -601,6 +601,18 @@ fn emit<T: Serialize>(value: &T) -> anyhow::Result<()> {
     let mut json = serde_json::to_string_pretty(value).context("serializing the response")?;
     json.push('\n');
     write_stdout(&json)
+}
+
+/// Colour for `tree` only, and only into a terminal: the render is for eyes (§5),
+/// and a pipe or a file is neither. `NO_COLOR` set to anything non-empty turns it
+/// off regardless, per <https://no-color.org>.
+fn colour() -> render::Colour {
+    let allowed = std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
+    if allowed && io::stdout().is_terminal() {
+        render::Colour::Ansi
+    } else {
+        render::Colour::Plain
+    }
 }
 
 /// The only place stdout is written — `tree` included, even though it is the one

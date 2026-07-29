@@ -228,17 +228,20 @@ Compact enough to print every turn. Marks the current head.
 
 ```
 hydra-design  (14 answered, 6 open)
-
-● consumption-surface   CLI unix tool
-  ● graph-shape         spanning tree + blocked_by
-    ● head-schema       answer{text, rationale, rejected}
-    ○ lifecycle         ← next
-  ● storage-format      mutable JSON, git = history
-    ⊘ write-model       cauterised by storage-format
-    ◌ resume-shape      blocked by lifecycle
+└── ● consumption-surface    CLI unix tool
+    ├── ● graph-shape        spanning tree + blocked_by
+    │   ├── ● head-schema    answer{text, rationale, rejected}
+    │   └── ○ lifecycle      ← next
+    └── ● storage-format     mutable JSON, git = history
+        ├── ⊘ write-model    cauterised by storage-format
+        └── ◌ resume-shape   blocked by lifecycle
 ```
 
 `●` answered · `○` ready · `◌` blocked · `⊘` cauterised · `←` next
+
+Connectors as `tree(1)` draws them, with the header line as the root every top-level head hangs off — so nesting is drawn rather than implied by indent, and a subtree reads as one block at any depth. Summaries share one character column, measured on characters rather than bytes.
+
+Colour when stdout is a terminal, and only then: glyph in its state's colour (answered green, ready bold cyan, blocked yellow, cauterised dim red), connectors and summaries dimmed, `← next` bold. `NO_COLOR` disables it. The escapes are zero-width to the terminal and non-zero to a string length, so the column is measured on the plain text and the paint applied after.
 
 ---
 
