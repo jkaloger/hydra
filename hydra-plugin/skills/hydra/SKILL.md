@@ -1,6 +1,6 @@
 ---
 name: hydra
-description: Interrogate a plan or design question by question, with every question, answer and rejected alternative stored in a decision tree on disk (`.hydra/`) instead of in context — so the interview survives compaction, a new session, and days off. Use to resume or pick up an interview started earlier, when a design's open questions have to be tracked across sessions rather than held in context, or when the user wants to be interviewed and the decisions recorded. Invoked as /hydra:hydra.
+description: Interview the user relentlessly about a plan or design. Use when the user wants to plan/design a system, break down a problem, asks an open question, or wants to continue from a previous interview.
 ---
 
 # hydra — the interview protocol
@@ -19,7 +19,7 @@ One question per turn. Never two. Never answer for the user.
 
 `hydra` is a store with invariants. It never reads question text and has no
 opinion about what to ask, what matters, or what order is best — it hands back
-the first *askable* head in document order. Option generation, tradeoffs, the
+the first _askable_ head in document order. Option generation, tradeoffs, the
 recommendation, and the judgement to jump elsewhere are **yours**. `hydra next`
 is a default, not an instruction.
 
@@ -166,7 +166,7 @@ hydra sprout --question 'Append-only or mutable?' --parent storage-format --slug
 
 They are not the same and mixing them corrupts the record.
 
-**`cauterise`** — a *sibling's answer killed this question*. It no longer applies.
+**`cauterise`** — a _sibling's answer killed this question_. It no longer applies.
 The head ends up answered, with `cauterised_by` set, so the record survives and
 the frontier clears.
 
@@ -177,7 +177,7 @@ graph-shape settled on a spanning tree whose heads get re-parented.
 EOF
 ```
 
-**`reopen`** — *ask it again*. The premise moved. The old answer is kept as
+**`reopen`** — _ask it again_. The premise moved. The old answer is kept as
 `prior`, so you re-present it and ask whether it still holds; the answer is
 usually one word.
 
@@ -193,7 +193,7 @@ as `prior_summary`, so one call covers the whole cascade. They block `done`, so
 they cannot be skipped.
 
 `cut --keep-subtree` suppresses the cascade: for a typo or a rewording, never when
-the substance changed. To fix the *question* rather than the answer, `hydra reword`
+the substance changed. To fix the _question_ rather than the answer, `hydra reword`
 leaves the answer alone.
 
 ## After a context reset
@@ -222,7 +222,7 @@ hydra status        # exit 0 = done, exit 4 = open heads remain
 Exit 4 means keep going. Nothing in the runtime will stop you wrapping up early,
 so this is discipline rather than enforcement: check `status` before you conclude
 anything, and if heads remain, say what is left rather than summarising as though
-it were finished. Stopping because the *user* asked to stop is always fine — the
+it were finished. Stopping because the _user_ asked to stop is always fine — the
 tree is on disk and the next session picks it up.
 
 Commit `.hydra/<slug>.json`: the decisions are about the code and belong in its
