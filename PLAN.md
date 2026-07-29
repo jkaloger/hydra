@@ -16,7 +16,7 @@ src/
 ├── query.rs          derived state, pre-order, ready/next/resume (§5, §7)
 ├── render.rs         ASCII tree (§5)
 └── main.rs           clap surface (§5)
-hydra-plugin/         the §6 plugin: manifest and skill
+claude-plugin/        the §6 plugin: manifest and skill
 scripts/smoke.sh      the CLI's only coverage (§8 excludes it from unit tests)
 README.md
 ```
@@ -51,7 +51,7 @@ Not unit tested (§8). Verified by a manual smoke script over the full verb surf
 
 ### I5 — plugin
 
-`hydra-plugin/` with `.claude-plugin/plugin.json` and `skills/hydra/SKILL.md` (interview protocol per §6, degrades if `command -v hydra` fails). Data files only: no hooks, no scripts.
+`claude-plugin/` with `.claude-plugin/plugin.json` and `skills/hydra/SKILL.md` (interview protocol per §6, degrades if `command -v hydra` fails). Data files only: no hooks, no scripts.
 
 ## Out of scope
 

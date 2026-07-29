@@ -250,7 +250,7 @@ Colour when stdout is a terminal, and only then: glyph in its state's colour (an
 Distributed as a Claude Code plugin. Not a `hydra skills install` subcommand — the CLI stays harness-agnostic.
 
 ```
-hydra-plugin/
+claude-plugin/
 ├── .claude-plugin/plugin.json
 └── skills/hydra/SKILL.md
 ```

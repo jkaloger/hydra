@@ -559,11 +559,11 @@ jqok '[.trees[] | select(.tree == "hydra-design") | .counts.done] == [true]'
 jqok 'all(.trees[]; has("error") == false)'
 
 echo
-echo "== hydra-plugin: the two files of §6"
+echo "== claude-plugin: the two files of §6"
 # The plugin is data, not code: a manifest and a skill, no hooks and no scripts.
 # So what is checkable from here is that both files are there, parse, and carry
 # the fields Claude Code addresses them by.
-readonly PLUGIN="$ROOT/hydra-plugin"
+readonly PLUGIN="$ROOT/claude-plugin"
 readonly MANIFEST="$PLUGIN/.claude-plugin/plugin.json"
 readonly SKILL="$PLUGIN/skills/hydra/SKILL.md"
 

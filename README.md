@@ -174,11 +174,11 @@ The Claude Code plugin is optional; hydra works from a shell, a Makefile, or any
 agent.
 
 ```sh
-claude --plugin-dir ./hydra-plugin      # this session only
+claude --plugin-dir ./claude-plugin      # this session only
 ```
 
-For a persistent install, add a marketplace listing `hydra-plugin/`, then
-`/plugin install hydra@<marketplace>`. `claude plugin validate ./hydra-plugin`
+For a persistent install, add a marketplace listing `claude-plugin/`, then
+`/plugin install hydra@<marketplace>`. `claude plugin validate ./claude-plugin`
 checks the manifest.
 
 The plugin ships one skill, `/hydra:hydra`, the interview protocol — Claude Code
