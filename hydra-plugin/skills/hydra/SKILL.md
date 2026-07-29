@@ -7,10 +7,11 @@ description: Interrogate a plan or design question by question, with every quest
 
 ```
 resume            skeleton + hydrated ancestry
+sprout ×N         the whole known decomposition, once, before asking anything
 next              head to ask
-  → lay out 2-4 options with tradeoffs, give a recommendation, ask, WAIT
+  → tree, then 2-4 options with tradeoffs, a recommendation, the question, WAIT
 cut <slug>        answer + rationale + rejected[]
-sprout            new heads the answer opened
+sprout            heads the answer genuinely opened
 cauterise         heads the answer killed
 ```
 
@@ -45,60 +46,75 @@ hydra use <slug>      # resume a different one
 hydra resume          # and orient
 ```
 
+After `init` the tree is empty: lay it out before you ask anything. See **Laying
+the tree out**.
+
 ## Exit codes are the interface
 
-| Code | Means | Do |
-| --- | --- | --- |
-| 0 | ok | carry on |
-| 1 | I/O, a tree file that will not parse, or a lock that would not come free | tell the user; `hydra trees` names the broken file. Not yours to fix by retrying |
-| 2 | usage — bad flag, two `-` in one call, `--reject` with no `:` | fix the command |
-| 3 | slug refused: no such head, or an invariant that protects the graph | read stderr, it names the slugs |
-| 4 | `hydra status` only: **open heads remain** | a signal, not a failure |
-| 5 | tree addressing: no `.hydra/`, no `HEAD`, no such tree — **or one that already exists** | read stderr before retrying: `init` on an existing tree is a 5, and running `init` again just gets another |
+`hydra --help` lists all six. Four need judgement rather than a lookup:
 
-Two things that look like failures and are not:
+- **4** — `status` only, open heads remain. The normal state of a live interview.
+  Never treat it as an error, and never wrap it in a way that aborts on nonzero.
+- **3** — a slug was refused; stderr names it. Commonest cause: cutting a head
+  whose `blocked_by` heads are not answered yet. Answer those first.
+- **5** — tree addressing, **including a tree that already exists**. Read stderr
+  before retrying: `init` on an existing tree is a 5, and running it again just
+  gets another.
+- **1** — I/O, a file that will not parse, a lock that would not come free. Tell
+  the user; `hydra trees` names the broken file. Not yours to fix by retrying.
 
-- `hydra status` exiting **4** is the normal state of a live interview. Never
-  treat it as an error, and never wrap it in a way that aborts on nonzero.
-- `hydra next` printing `null` is the **done** signal. `[]` from `hydra ready`
-  says the same. Both exit 0.
-
-The commonest 3: cutting a head whose `blocked_by` heads are not answered yet.
-Answer those first — or `--force`, which records nothing, so if you force it you
-own it.
+`hydra next` printing `null` is the **done** signal, as is `[]` from `hydra
+ready`. Both exit 0.
 
 ## Reading the tree
 
 Two tiers, because a large tree is mostly settled branches irrelevant to the
 next question:
 
-- **`hydra resume`** — `counts`, `next` (a slug), `skeleton` (every head: slug,
-  question, status, state, first line of the answer, and `prior_summary` for a
-  head that was answered and is open again), and `hydrated` (full detail for
-  `next` and its ancestor chain, root first). The skeleton is the map: scan it
-  before you ask anything, so you do not re-ask a question already settled in a
-  distant branch. That duplication is semantic and nothing in the tool can catch
-  it.
-- **`hydra show <slug>`** — one head, full detail, on demand. Reach for it when
-  the skeleton line is not enough to ask the question well.
-- **`hydra next`** — the head to ask, already hydrated (`ancestors` are its
-  premises). `hydra ready` is every askable head if you want to choose a
-  different one.
+- **`hydra resume`** — everything you need cold, `next` plus a skeleton of every
+  head. **Scan the skeleton before you ask anything**, so you do not re-ask a
+  question already settled in a distant branch. That duplication is semantic and
+  nothing in the tool can catch it.
+- **`hydra show <slug>`** — one head, full detail. Reach for it when the skeleton
+  line is not enough to ask the question well.
+- **`hydra next`** — the head to ask, hydrated; its `ancestors` are its premises.
+  `hydra ready` is every askable head if you want to choose a different one.
 - **`hydra tree`** — the ASCII render, the one output for eyes rather than for
-  you. Print it after a cut that reopened heads, or when the user asks where
-  things stand. Not every turn: it is noise between two questions in the same
-  branch.
+  you. It opens every question turn; see **Asking**.
+
+## Laying the tree out
+
+A tree fresh from `hydra init` has no heads. Before you ask anything, sprout the
+whole decomposition you can already see in the brief: every question the design
+has to answer, at every depth, with its parents and its `blocked_by` edges. One
+`sprout` per head, issued as a batch. Then `hydra resume` and start asking.
+
+Do this even when the first question is obvious. A tree grown one head at a time
+never shows the user what the interview covers, so gaps and scope creep both stay
+invisible until the end; and `next` walks document order, so a tree laid out up
+front asks in a coherent sequence rather than the order things occurred to you.
+
+A real brief is a dozen heads or more. If your layout has three, you have
+restated the brief's headings instead of decomposing it.
+
+Sprout later only for a question that **did not exist** until the user picked
+that option. Finding yourself sprouting a head you could have foreseen means the
+layout was too thin, not the answer unusually generative.
 
 ## Asking
 
-For the head `next` hands you:
+Every question turn has the same four parts, in this order:
 
-1. Read its `ancestors` — those are the premises. An answer that contradicts a
-   parent is a signal to `reopen` the parent, not to answer this head.
-2. Generate **2-4 real options**. Distinct, non-strawman, each with the tradeoff
-   that actually decides between them.
-3. State a recommendation and why.
-4. Ask. Then **stop and wait**. Do not proceed on an assumed answer.
+1. **The tree** — `hydra tree`, verbatim, in a fenced block. Every turn, no
+   exceptions. It is how the user sees where they are, and it costs a few lines.
+2. **2-4 real options** — distinct, non-strawman, each with the tradeoff that
+   actually decides between them.
+3. **A recommendation**, and why.
+4. **The question.** Then **stop and wait**. Do not proceed on an assumed answer.
+
+Read the head's `ancestors` before you write any of it — those are its premises.
+An answer that contradicts a parent is a signal to `reopen` the parent, not to
+answer this head.
 
 Ending the turn on a question is correct and nothing will stop you. Answering
 your own question to keep moving is the one failure mode this skill cannot
@@ -122,12 +138,8 @@ EOF
 
 - **Lead the answer with the decision.** Its first line is the skeleton summary
   every future session reads.
-- `--rationale -` instead, when the rationale is the awkward one to quote and the
-  answer is short.
-- `--reject '<option>: <why>'`, repeatable, split on the first `:`. Fill it
-  whenever an option was genuinely considered and killed — `rejected[]` is what
-  stops a future session re-proposing a dead branch. Both halves must be
-  non-empty or you get exit 2.
+- **Fill `--reject` whenever an option was genuinely considered and killed.**
+  `rejected[]` is what stops a future session re-proposing a dead branch.
 
 Then open what the answer opened, and kill what it killed:
 
@@ -140,17 +152,13 @@ hydra sprout --question 'Append-only or mutable?' --parent storage-format --slug
 - `--parent` nests for narrative; omit it for a root. `--blocked-by` is for a
   real cross-branch dependency — this head cannot be asked until that one is
   answered. Do not fake a parent to express gating.
-- `--slug` is optional; omitted, hydra derives one from the question and reports
-  it as `.slug`.
-- Graph surgery on an existing head: `hydra link <slug> --blocked-by <slug>`,
-  `hydra unlink <slug> --blocked-by <slug>`, `hydra reparent <slug> --parent
-  <slug>` (`--parent ''` roots it).
+- Graph surgery on an existing head: `link`, `unlink`, `reparent` (`--parent ''`
+  roots it).
 - **Never gate a head on its own descendant.** The cascade walks children and
   `blocked_by` as one relation, so `link a --blocked-by b` where `b` sits under
-  `a` makes the two reopen each other forever: `status` never leaves 4 and `next`
-  never returns `null`, so the interview can never finish.
-  Hydra refuses that edge (exit 3, naming the loop). `link --force` overrides it
-  and is the one flag that can build a tree which can never reach done — do not.
+  `a` makes the two reopen each other forever — the interview can never reach
+  done. Hydra refuses the edge (exit 3, naming the loop); `link --force`
+  overrides it, and is the one flag that can build an unfinishable tree. Do not.
   Gating on an **ancestor** is the normal, correct case: staleness already flows
   down the tree, so the edge adds no loop.
 
@@ -159,10 +167,8 @@ hydra sprout --question 'Append-only or mutable?' --parent storage-format --slug
 They are not the same and mixing them corrupts the record.
 
 **`cauterise`** — a *sibling's answer killed this question*. It no longer applies.
-The head ends up answered with `answer.text = "cauterised"` and `cauterised_by`
-set, so the record survives and the frontier clears. `--why` takes `-` like the
-other prose flags; inline in quotes is fine for one clause. `--by` must name an
-**answered** head, or exit 3.
+The head ends up answered, with `cauterised_by` set, so the record survives and
+the frontier clears.
 
 ```bash
 hydra cauterise numbering --by graph-shape --why - <<'EOF'
@@ -179,20 +185,16 @@ usually one word.
 hydra reopen graph-shape
 ```
 
-## Cascades and `.reopened`
+Either way the change cascades: re-answering a head transitively reopens its
+descendants and everything gated by it. Every mutation response carries
+`.reopened`, **the heads to re-present**. Work through them, showing each old
+answer back and asking whether it still holds — `resume`'s skeleton carries them
+as `prior_summary`, so one call covers the whole cascade. They block `done`, so
+they cannot be skipped.
 
-Re-answering a head transitively reopens its descendants and everything gated by
-it. Every mutation response carries `.reopened`: a slug array, **the heads to
-re-present**. Work through them, showing each old answer back and asking whether
-it still holds. They block `done`, so they cannot be skipped.
-
-The old answer is on `hydra resume`'s skeleton rows as `prior_summary` (first line
-only) — one call covers the whole cascade — or in full as `.prior.text` from
-`hydra show <slug>`.
-
-`--keep-subtree` on `cut` suppresses the cascade. Use it for a typo or a
-rewording, never when the substance changed. To fix the *question* rather than the
-answer, `hydra reword <slug> --question <text|->` leaves the answer alone.
+`cut --keep-subtree` suppresses the cascade: for a typo or a rewording, never when
+the substance changed. To fix the *question* rather than the answer, `hydra reword`
+leaves the answer alone.
 
 ## After a context reset
 
