@@ -28,25 +28,30 @@ hydra show <slug>
 
 ## Description
 
-An interviewer asks one question at a time about a plan. Each open question is
-a **head**; answering it is a **cut**, which may sprout more heads. Hydra stores
-the heads, the answers and the dependencies between them as structured data on
-disk, so the interview survives the process that was conducting it.
+Hydra maintains a tree of the questions asked during a design interview, in
+which one question is put at a time. An unanswered question is a **head**.
+Answering a head is a **cut**. A cut may sprout further heads, and reopens the
+heads that depend on the one answered.
 
-Hydra holds no opinion about what to ask. It never reads question text. It
-refuses writes that would corrupt the graph (see _Invariants_) and reports which
-heads can be asked next.
+Heads, answers, and the edges between them are stored as JSON under `.hydra/`.
+Each invocation reads that store and exits; no state is held between
+invocations.
 
-Every command writes JSON to stdout except `tree`, which is formatted for
-reading. Rejections and diagnostics go to stderr, so stdout stays parseable at
-any exit status. The on-disk format is `jq`-native by intent: much of the read
-surface is a one-liner against the tree file rather than a subcommand.
+Hydra does not read the text of a question and does not select which question is
+put next. It refuses any write that would violate an invariant (see
+_Invariants_) and reports which heads have no unanswered dependencies.
 
-Prose options take `-` to read the value from stdin: `--question`, `--answer`,
-`--rationale`, `--why`. Stdin is read once, so at most one `-` per invocation.
+Every command writes JSON to stdout, except `tree`, whose output is formatted
+for reading. Rejections and diagnostics are written to stderr. Stdout is
+parseable at every exit status.
 
-The first line of an answer is what a later session sees in the `resume`
-skeleton; put the decision there and the reasoning after it.
+The options `--question`, `--answer`, `--rationale` and `--why` accept `-` as a
+value, in which case the value is read from stdin. Stdin is read once, so at
+most one such option may be given per invocation.
+
+Only the first line of an answer appears in the skeleton written by `resume`.
+The remainder is reported by `show`, and by `resume` for `next` and its
+ancestors.
 
 ## Commands
 
@@ -59,9 +64,9 @@ skeleton; put the decision there and the reasoning after it.
 | `trees`       | Every tree in the store with its counts, and which one `HEAD` names                                |
 | `status`      | Counts for the `HEAD` tree. Exits 4 while open heads remain                                        |
 
-`init` reuses the nearest `.hydra/` at or above the cwd, and creates one in the
-cwd only if there is none. Discovery walks up, so a nested `.hydra/` shadows the
-store above it instead of extending it.
+`init` reuses the nearest `.hydra/` at or above the cwd and creates one in the
+cwd only if there is none. Discovery walks upward, so a nested `.hydra/` shadows
+the store above it rather than extending it.
 
 ### Mutation
 
@@ -69,15 +74,16 @@ store above it instead of extending it.
 | -------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `sprout`                   | Open a new head. Omit `--parent` for a root; `--slug` defaults to a slug derived from the question      |
 | `cut`                      | Answer a head. Reopens its descendants and everything it gates                                          |
-| `cauterise` (alias `sear`) | Kill a question a sibling's answer made moot. The head ends up answered with `answer.cauterised_by` set |
-| `reopen`                   | Withdraw an answer and ask again. Always cascades; the old answer is kept as `prior`                    |
-| `reword`                   | Change a head's question, leaving its answer alone                                                      |
+| `cauterise` (alias `sear`) | Answer a head that another head's answer has made unnecessary, setting `answer.cauterised_by`           |
+| `reopen`                   | Discard an answer and reopen the head. Always cascades. The discarded answer is retained as `prior`      |
+| `reword`                   | Replace a head's question, leaving its answer unchanged                                                 |
 | `reparent`                 | Move a head under a different parent. `--parent ''` makes it a root                                     |
 | `link` / `unlink`          | Add or remove a `blocked_by` edge. Idempotent                                                           |
 
-`cut --keep-subtree` skips the cascade — for typos and rewording, not for
-decisions. `--force` on `cut`, `cauterise` and `link` overrides an invariant and
-records nothing.
+`cut --keep-subtree` suppresses the cascade, leaving descendants and gated heads
+as they are. `--force` is accepted by `cut`, `cauterise` and `link`; it overrides
+the invariant that would otherwise reject the write, and is not recorded in the
+tree.
 
 ### Query
 
@@ -85,14 +91,14 @@ records nothing.
 | ------------- | ------------------------------------------------------------------------------------------------------ |
 | `ready`       | Open heads whose dependencies are answered, in pre-order. `[]` when there are none                     |
 | `next`        | The first ready head. `null` when nothing can be asked                                                 |
-| `show <slug>` | One head, fully hydrated                                                                               |
-| `resume`      | Cold-start payload: counts, `next`, a skeleton of every head, full detail for `next` and its ancestors |
-| `tree`        | ASCII render. The one command whose output is for eyes                                                 |
+| `show <slug>` | One head, with every field resolved                                                                    |
+| `resume`      | Counts, `next`, a skeleton of every head, and full detail for `next` and its ancestors                 |
+| `tree`        | ASCII rendering, formatted for reading rather than parsing                                             |
 
-Pre-order is a depth-first walk with siblings ascending by `seq` — document
-order, not priority.
+Pre-order is a depth-first walk in which siblings are visited in ascending `seq`
+order. `seq` is assigned when a head is sprouted and does not encode priority.
 
-`hydra --help` and `hydra help <command>` carry the same surface.
+`hydra --help` and `hydra help <command>` describe the same surface.
 
 ## Files
 
@@ -103,22 +109,22 @@ order, not priority.
 └── <slug>.lock        advisory lock, held for the length of a write
 ```
 
-Repo-local and git-tracked: these decisions are about the code and belong in its
-history. Trees are mutable documents, not event logs — sorted keys,
-pretty-printed, one field per line, written by temp file and atomic rename, so
-diffs stay minimal and reviewable. Git is the event log; `prior` and `rejected[]`
-carry what a single overwrite would otherwise lose.
+The store is created within the repository and is intended to be committed. A
+tree file is a mutable document rather than an event log: keys are sorted, the
+output is pretty-printed one field per line, and each write is made to a
+temporary file and renamed into place. `prior` and `rejected[]` retain the
+answers and options that an overwrite would otherwise discard.
 
 ## Exit status
 
 | Code | Meaning                                                                                                          |
 | ---- | ---------------------------------------------------------------------------------------------------------------- |
-| 0    | ok; for `status`, no open heads remain                                                                           |
-| 1    | I/O, malformed JSON, or a lock that would not come free                                                          |
-| 2    | usage                                                                                                            |
-| 3    | a slug was refused: an invariant, or a head that is not there. stderr names the offending slugs                  |
-| 4    | `status` only: open heads remain                                                                                 |
-| 5    | tree addressing: no `.hydra/`, no `HEAD`, no such tree, one that already exists, or one written by a newer hydra |
+| 0    | Success. For `status`, no open heads remain                                                                      |
+| 1    | I/O error, malformed JSON, or a lock that could not be acquired                                                  |
+| 2    | Usage error                                                                                                      |
+| 3    | A slug was refused, either by an invariant or because no such head exists. The offending slugs are named on stderr |
+| 4    | `status` only: open heads remain                                                                                  |
+| 5    | Tree addressing: no `.hydra/`, no `HEAD`, no such tree, a tree that already exists, or one written by a newer hydra |
 
 ## Invariants
 
@@ -132,11 +138,13 @@ Refused at write, exit 3:
 6. An illegal transition. Only `open → answered` and `answered → open`.
 7. `cauterise --by` pointing at an unanswered head.
 8. A duplicate or malformed slug.
-9. An edge — `blocked_by` or `parent` — that would create a cycle in the cascade
-   relation, which walks children and `blocked_by` as one. Gating a head on an
-   ancestor is legal; gating on a descendant makes the tree unable to reach done.
+9. An edge, `blocked_by` or `parent`, that would create a cycle in the cascade
+   relation, which traverses children and `blocked_by` alike. Gating a head on an
+   ancestor is permitted. Gating a head on a descendant leaves the tree unable to
+   reach a state in which no heads are open.
 
-`--force` covers 3, 5, 7 and 9 only. [SPEC.md](SPEC.md) §4 has the reasoning.
+`--force` applies to 3, 5, 7 and 9 only. [SPEC.md](SPEC.md) §4 gives the
+reasoning.
 
 ## Examples
 
@@ -157,7 +165,7 @@ hydra tree
 hydra status
 ```
 
-Read straight off disk instead of shelling a subcommand:
+The tree file can also be read directly:
 
 ```sh
 jq -r '.heads | to_entries[] | select(.value.status == "open") | .key' .hydra/my-design.json
@@ -169,27 +177,29 @@ jq -r '.heads | to_entries[] | select(.value.status == "open") | .key' .hydra/my
 cargo install --path .
 ```
 
-The Claude Code plugin is optional; hydra works from a shell, a Makefile, or any
-agent.
+The Claude Code plugin is optional. Hydra is invoked from a shell, a Makefile, or
+an agent.
 
 ```sh
 claude --plugin-dir ./claude-plugin      # this session only
 ```
 
-The repo is its own marketplace, so a persistent install is two commands:
+The repository is also a plugin marketplace. A persistent install takes two
+commands:
 
 ```
 /plugin marketplace add jkaloger/hydra
 /plugin install hydra@hydra
 ```
 
-`claude plugin validate ./claude-plugin --strict` checks the manifest;
-`claude plugin validate . --strict` checks the marketplace listing it.
+`claude plugin validate ./claude-plugin --strict` checks the manifest.
+`claude plugin validate . --strict` checks the marketplace that lists it.
 
-The plugin ships one skill, `/hydra:hydra`, the interview protocol — Claude Code
-addresses a plugin's skills as `plugin:skill` and does not collapse the case
-where both names match. It shells to the `hydra` binary, so install that first;
-without it the skill says so and falls back to interviewing in context.
+The plugin provides one skill, `/hydra:hydra`, which contains the interview
+protocol. Claude Code addresses a plugin's skills as `plugin:skill`, and does not
+collapse the case in which both names are the same. The skill invokes the `hydra`
+binary. If the binary is absent, the skill reports this and conducts the
+interview in context.
 
 ## Development
 
