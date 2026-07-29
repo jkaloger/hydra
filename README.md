@@ -3,7 +3,7 @@
   <br>hydra
 </h1>
 <p align="center">
-    Decision trees for AI-led design interviews.
+    Decision trees for LLM-led design interviews.
 </p>
 
 <img alt="Terminal displaying a breakdown of a design interview with questions and answers listed" src="https://github.com/user-attachments/assets/ccc0b5a7-0672-46bc-b8a0-f77bc3949448" />
