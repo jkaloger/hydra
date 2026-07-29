@@ -5,9 +5,8 @@
 <p align="center">
     Decision trees for AI-led design interviews.
 </p>
-<p align="center">
-  <a href="#license"><img alt="license: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg"></a>
-</p>
+
+<img alt="Terminal displaying a breakdown of a design interview with questions and answers listed" src="https://github.com/user-attachments/assets/ccc0b5a7-0672-46bc-b8a0-f77bc3949448" />
 
 ## Synopsis
 
