@@ -535,7 +535,7 @@ mod tests {
     use crate::store;
 
     fn tree() -> Tree {
-        Tree::new("t".to_string())
+        Tree::new("t".to_string(), "test intent".to_string())
     }
 
     fn add(tree: &mut Tree, slug: &str, parent: Option<&str>) {

@@ -11,7 +11,7 @@
 ## Synopsis
 
 ```
-hydra init [slug]
+hydra init [slug] --intent <text|->
 hydra use <slug>
 hydra trees | status | ready | next | resume | tree
 hydra sprout --question <text|-> [--parent <slug>] [--blocked-by <slug,...>] [--slug <slug>]
@@ -45,9 +45,14 @@ Every command writes JSON to stdout, except `tree`, whose output is formatted
 for reading. Rejections and diagnostics are written to stderr. Stdout is
 parseable at every exit status.
 
-The options `--question`, `--answer`, `--rationale` and `--why` accept `-` as a
-value, in which case the value is read from stdin. Stdin is read once, so at
-most one such option may be given per invocation.
+The options `--question`, `--answer`, `--intent`, `--rationale` and `--why`
+accept `-` as a value, in which case the value is read from stdin. Stdin is read
+once, so at most one such option may be given per invocation.
+
+A tree carries an **intent**: prose stating what the interview is for, given at
+`init` and stored alongside the slug. It is the first field written by `resume`.
+Hydra does not read it. A tree written by a version of hydra predating the field
+has an empty intent.
 
 Only the first line of an answer appears in the skeleton written by `resume`.
 The remainder is reported by `show`, and by `resume` for `next` and its
@@ -59,7 +64,7 @@ ancestors.
 
 | Command       | Effect                                                                                             |
 | ------------- | -------------------------------------------------------------------------------------------------- |
-| `init [slug]` | Create a tree and point `HEAD` at it. Slug defaults to the name of the directory holding `.hydra/` |
+| `init [slug]` | Create a tree and point `HEAD` at it. Slug defaults to the name of the directory holding `.hydra/`. `--intent` is required and is rejected if blank |
 | `use <slug>`  | Move `HEAD` to an existing tree                                                                    |
 | `trees`       | Every tree in the store with its counts, and which one `HEAD` names                                |
 | `status`      | Counts for the `HEAD` tree. Exits 4 while open heads remain                                        |
@@ -92,7 +97,7 @@ tree.
 | `ready`       | Open heads whose dependencies are answered, in pre-order. `[]` when there are none                     |
 | `next`        | The first ready head. `null` when nothing can be asked                                                 |
 | `show <slug>` | One head, with every field resolved                                                                    |
-| `resume`      | Counts, `next`, a skeleton of every head, and full detail for `next` and its ancestors                 |
+| `resume`      | The intent, counts, `next`, a skeleton of every head, and full detail for `next` and its ancestors     |
 | `tree`        | ASCII rendering, formatted for reading rather than parsing                                             |
 
 Pre-order is a depth-first walk in which siblings are visited in ascending `seq`
@@ -150,7 +155,7 @@ reasoning.
 
 ```sh
 cd my-project
-hydra init my-design
+hydra init my-design --intent 'Settle the storage format and CLI surface before any of it is built.'
 hydra sprout --question 'What does this look like from outside?' --slug surface
 hydra sprout --question 'How is state stored?' --parent surface --slug storage
 hydra next

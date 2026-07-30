@@ -252,7 +252,7 @@ mod tests {
     /// larger tree the example is a window onto, so only the body is reproduced
     /// byte for byte.
     fn spec_example() -> Tree {
-        let mut t = Tree::new("hydra-design".to_string());
+        let mut t = Tree::new("hydra-design".to_string(), "test intent".to_string());
         cut(&mut t, "consumption-surface", None, "CLI unix tool");
         cut(
             &mut t,
@@ -344,7 +344,7 @@ hydra-design  (5 answered, 2 open)
     /// `café-über` spends on two characters.
     #[test]
     fn a_multibyte_slug_does_not_shift_the_column() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         cut(&mut t, "ascii", None, "one");
         cut(&mut t, "placeholder", None, "two");
         let mut head = t.heads.remove("placeholder").unwrap();
@@ -372,7 +372,7 @@ t  (2 answered, 0 open)
     /// connectors and glyph in front of it and the answers behind it are not.
     #[test]
     fn multibyte_content_does_not_disturb_the_column() {
-        let mut t = Tree::new("hydra-design".to_string());
+        let mut t = Tree::new("hydra-design".to_string(), "test intent".to_string());
         cut(&mut t, "one", None, "日本語 で 答え\nsecond line dropped");
         cut(
             &mut t,
@@ -397,7 +397,7 @@ hydra-design  (2 answered, 1 open)
 
     #[test]
     fn glyphs_follow_the_derived_state() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         cut(&mut t, "answered", None, "yes");
         add(&mut t, "ready", None);
         add(&mut t, "blocked", None);
@@ -429,7 +429,7 @@ t  (2 answered, 2 open)
     /// say which sibling sets are still open above it.
     #[test]
     fn connectors_close_each_sibling_set_and_carry_the_bars_below_it() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         add(&mut t, "a", None);
         add(&mut t, "a1", Some("a"));
         add(&mut t, "deep", Some("a1"));
@@ -453,7 +453,7 @@ t  (0 answered, 6 open)
 
     #[test]
     fn the_next_marker_moves_with_next() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         add(&mut t, "first", None);
         add(&mut t, "second", None);
 
@@ -480,7 +480,7 @@ t  (0 answered, 6 open)
 
     #[test]
     fn a_blocked_head_names_every_open_blocker() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         add(&mut t, "gate-a", None);
         add(&mut t, "gate-b", None);
         add(&mut t, "waiting", None);
@@ -504,7 +504,7 @@ t  (0 answered, 6 open)
     #[test]
     fn an_empty_tree_renders_the_header_alone() {
         assert_eq!(
-            plain(&Tree::new("fresh".to_string())),
+            plain(&Tree::new("fresh".to_string(), "test intent".to_string())),
             "fresh  (0 answered, 0 open)\n"
         );
     }
@@ -514,7 +514,7 @@ t  (0 answered, 6 open)
     /// point is drawn as the sibling of those roots that it is walked as.
     #[test]
     fn a_parent_cycle_renders_every_head_once() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         add(&mut t, "a", None);
         add(&mut t, "b", Some("a"));
         add(&mut t, "loose", None);
@@ -585,7 +585,7 @@ t  (0 answered, 3 open)
     /// padding, and no escape sequence opened for a summary that is not there.
     #[test]
     fn a_row_with_no_summary_ends_at_its_slug() {
-        let mut t = Tree::new("t".to_string());
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
         add(&mut t, "first", None);
         add(&mut t, "second", None);
 

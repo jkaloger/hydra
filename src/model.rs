@@ -19,16 +19,27 @@ pub fn now() -> Timestamp {
 pub struct Tree {
     pub version: u32,
     pub slug: String,
+    /// What the interview is for, in prose (§3). Required at `init`, so no path
+    /// in the lib makes a tree without one.
+    ///
+    /// `default` rather than `Option`: a tree written before this field existed
+    /// has to keep loading, and bumping `VERSION` for an additive field would
+    /// make every one of them a §3 version rejection instead. Empty therefore
+    /// means "written by an older hydra", which a consumer can tell apart from
+    /// prose.
+    #[serde(default)]
+    pub intent: String,
     pub created_at: Timestamp,
     /// Keyed by slug, unique within the tree (§2).
     pub heads: BTreeMap<String, Head>,
 }
 
 impl Tree {
-    pub fn new(slug: String) -> Self {
+    pub fn new(slug: String, intent: String) -> Self {
         Tree {
             version: VERSION,
             slug,
+            intent,
             created_at: now(),
             heads: BTreeMap::new(),
         }
@@ -212,6 +223,7 @@ mod tests {
       "updated_at": "2026-07-28T04:19:31Z"
     }
   },
+  "intent": "Design hydra itself: what it stores, what it refuses, what it looks like from outside.",
   "slug": "hydra-design",
   "version": 1
 }
@@ -274,6 +286,7 @@ mod tests {
         Tree {
             version: VERSION,
             slug: "hydra-design".to_string(),
+            intent: "Design hydra itself: what it stores, what it refuses, what it looks like from outside.".to_string(),
             created_at: ts("2026-07-28T04:11:02Z"),
             heads,
         }
@@ -295,6 +308,18 @@ mod tests {
             assert!(root[key].is_null(), "{key} should be null");
         }
         assert!(value["heads"]["graph-shape"]["answer"]["cauterised_by"].is_null());
+    }
+
+    /// The whole reason `intent` is `#[serde(default)]` rather than a `VERSION`
+    /// bump (§3): a tree committed before the field existed still loads, and
+    /// reads as empty rather than as prose.
+    #[test]
+    fn a_tree_without_intent_loads_empty() {
+        let mut value: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        value.as_object_mut().unwrap().remove("intent");
+        let parsed: Tree = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.intent, "");
+        assert_eq!(parsed.version, VERSION);
     }
 
     #[test]
@@ -320,7 +345,11 @@ mod tests {
         // Asserted against the raw text, not a parsed Value: parsing back into
         // serde_json's BTreeMap-backed Map re-sorts the keys, so a Value-based
         // check passes whatever the file actually says.
-        assert_keys_ascending(&first, 2, &["created_at", "heads", "slug", "version"]);
+        assert_keys_ascending(
+            &first,
+            2,
+            &["created_at", "heads", "intent", "slug", "version"],
+        );
         assert_keys_ascending(
             &first,
             6,
@@ -363,7 +392,7 @@ mod tests {
     fn timestamps_are_rfc3339_zulu() {
         let json = store::to_json(&Tree {
             created_at: ts("2026-07-28T04:11:02Z"),
-            ..Tree::new("t".to_string())
+            ..Tree::new("t".to_string(), "test intent".to_string())
         })
         .unwrap();
         assert!(

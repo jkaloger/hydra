@@ -6,7 +6,7 @@ description: Interview the user relentlessly about a plan or design. Use when th
 # hydra — the interview protocol
 
 ```
-resume            skeleton + hydrated ancestry
+resume            intent + skeleton + hydrated ancestry
 sprout ×N         the whole known decomposition, once, before asking anything
 next              head to ask
   → tree, then 2-4 options with tradeoffs, a recommendation, the question, WAIT
@@ -40,11 +40,20 @@ instead** — same loop, same discipline, tracked in your own notes. Do not stop
 `hydra resume` exits **5** when there is no tree to interview. Then:
 
 ```bash
-hydra init <slug>     # new interview; points HEAD at it
+hydra init <slug> --intent - <<'EOF'   # new interview; points HEAD at it
+Decide the storage format and CLI surface for the audit log, before we build it.
+EOF
 hydra trees           # what already exists here
 hydra use <slug>      # resume a different one
 hydra resume          # and orient
 ```
+
+`--intent` is **required** and is the one thing you cannot reconstruct later:
+write what this interview is *for*, in a sentence or two of prose, from the
+user's brief. It is the first field `resume` hands back, so every future session
+— including yours after a reset — reads the tree against it instead of guessing
+purpose from the question list. Blank is refused (exit 2). Do not paraphrase the
+slug, and do not list the questions.
 
 After `init` the tree is empty: lay it out before you ask anything. See **Laying
 the tree out**.
@@ -71,10 +80,14 @@ ready`. Both exit 0.
 Two tiers, because a large tree is mostly settled branches irrelevant to the
 next question:
 
-- **`hydra resume`** — everything you need cold, `next` plus a skeleton of every
-  head. **Scan the skeleton before you ask anything**, so you do not re-ask a
-  question already settled in a distant branch. That duplication is semantic and
-  nothing in the tool can catch it.
+- **`hydra resume`** — everything you need cold: `intent`, then `next` plus a
+  skeleton of every head. **Read `intent` first** — it is what the interview is
+  for, stated by whoever started it, and it is what tells you whether a question
+  is in scope. An empty `intent` means the tree predates the field; infer purpose
+  from the skeleton and say that you are inferring it. **Scan the skeleton before
+  you ask anything**, so you do not re-ask a question already settled in a
+  distant branch. That duplication is semantic and nothing in the tool can catch
+  it.
 - **`hydra show <slug>`** — one head, full detail. Reach for it when the skeleton
   line is not enough to ask the question well.
 - **`hydra next`** — the head to ask, hydrated; its `ancestors` are its premises.

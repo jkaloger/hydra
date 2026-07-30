@@ -54,8 +54,9 @@ every answer is a cut that may sprout more.
 JSON on stdout for every command but `tree`, which is for eyes. Rejections and
 notes go to stderr, so stdout stays parseable at any exit code.
 
-Prose arguments take `-` to read the value from stdin: --answer, --rationale,
---question and --why. Stdin can only be read once, so one `-` per invocation.
+Prose arguments take `-` to read the value from stdin: --answer, --intent,
+--question, --rationale and --why. Stdin can only be read once, so
+one `-` per invocation.
 
 Exit codes:
   0  ok; for `status`, no open heads remain
@@ -82,6 +83,9 @@ enum Command {
     Init {
         /// Tree slug. Defaults to the name of the directory holding .hydra/.
         slug: Option<String>,
+        /// What this interview is for, in prose. `-` reads stdin.
+        #[arg(long, value_name = "TEXT|-")]
+        intent: String,
     },
 
     /// Move HEAD to an existing tree.
@@ -231,7 +235,15 @@ fn main() {
 
 fn run(command: Command) -> anyhow::Result<i32> {
     match command {
-        Command::Init { slug } => {
+        Command::Init { slug, mut intent } => {
+            resolve_stdin("init", &mut [("--intent", &mut intent)])?;
+            // Required by clap, but `--intent ''` would satisfy that and leave
+            // the field indistinguishable from a tree written before it existed.
+            // A cold start reading blank prose is the failure the field exists to
+            // remove, so refuse it here rather than store it.
+            if intent.trim().is_empty() {
+                usage("init", "--intent was blank");
+            }
             let cwd = std::env::current_dir().context("resolving the current directory")?;
             let store = adopt_or_init(&cwd)?;
             let slug = match slug {
@@ -240,7 +252,7 @@ fn run(command: Command) -> anyhow::Result<i32> {
             };
             // `create` is the only public path to a new tree, and it refuses to
             // clobber, so HEAD only moves once the file is on disk.
-            let tree = store.create(&slug)?;
+            let tree = store.create(&slug, intent.trim())?;
             store.set_head(&slug)?;
             emit(&Mutation::new("init", &tree, None, vec![]))?;
         }

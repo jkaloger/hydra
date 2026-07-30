@@ -145,7 +145,7 @@ impl Store {
 
     /// The only way to bring a tree into existence. Locked, so two concurrent
     /// `hydra init` runs cannot both believe they won.
-    pub fn create(&self, slug: &str) -> Result<Tree> {
+    pub fn create(&self, slug: &str, intent: &str) -> Result<Tree> {
         slug::validate(slug)?;
         let _lock = lock_exclusive(&self.lock_path(slug), LOCK_TIMEOUT)?;
         if self.tree_path(slug).exists() {
@@ -153,7 +153,7 @@ impl Store {
                 slug: slug.to_string(),
             });
         }
-        let tree = Tree::new(slug.to_string());
+        let tree = Tree::new(slug.to_string(), intent.to_string());
         self.save(&tree)?;
         Ok(tree)
     }
@@ -272,7 +272,7 @@ mod tests {
     }
 
     fn tree(slug: &str) -> Tree {
-        Tree::new(slug.to_string())
+        Tree::new(slug.to_string(), "test intent".to_string())
     }
 
     fn head(slug: &str, seq: u32) -> Head {
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn saved_file_is_complete_and_leaves_no_temp_files() {
         let (_root, store) = store();
-        let mut t = store.create("hydra-design").unwrap();
+        let mut t = store.create("hydra-design", "test intent").unwrap();
         for (i, slug) in ["graph-shape", "storage-format"].iter().enumerate() {
             t.heads.insert(slug.to_string(), head(slug, i as u32 + 1));
         }
@@ -377,7 +377,7 @@ mod tests {
     fn trees_names_the_trees_and_nothing_else() {
         let (_root, store) = store();
         for slug in ["storage-format", "hydra-design"] {
-            store.create(slug).unwrap();
+            store.create(slug, "test intent").unwrap();
         }
         store.set_head("hydra-design").unwrap();
         // Everything a real store carries alongside its trees, plus a `.json`
@@ -401,9 +401,9 @@ mod tests {
     #[test]
     fn create_refuses_to_clobber() {
         let (_root, store) = store();
-        store.create("hydra-design").unwrap();
+        store.create("hydra-design", "test intent").unwrap();
         assert!(matches!(
-            store.create("hydra-design"),
+            store.create("hydra-design", "test intent"),
             Err(Error::TreeExists { slug }) if slug == "hydra-design"
         ));
     }
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn with_tree_mut_persists_and_releases_the_lock() {
         let (_root, store) = store();
-        store.create("hydra-design").unwrap();
+        store.create("hydra-design", "test intent").unwrap();
 
         for slug in ["graph-shape", "storage-format"] {
             store
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn with_tree_mut_does_not_save_when_the_closure_fails() {
         let (_root, store) = store();
-        store.create("hydra-design").unwrap();
+        store.create("hydra-design", "test intent").unwrap();
         let err = store.with_tree_mut("hydra-design", |t| {
             t.heads
                 .insert("graph-shape".to_string(), head("graph-shape", 1));
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn contended_lock_times_out() {
         let (_root, store) = store();
-        store.create("hydra-design").unwrap();
+        store.create("hydra-design", "test intent").unwrap();
         let path = store.lock_path("hydra-design");
 
         let held = lock_exclusive(&path, LOCK_TIMEOUT).unwrap();
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn concurrent_with_tree_mut_serialises() {
         let (_root, store) = store();
-        store.create("hydra-design").unwrap();
+        store.create("hydra-design", "test intent").unwrap();
 
         let (a_holding, a_has_lock) = mpsc::channel();
         let (b_holding, b_has_lock) = mpsc::channel();

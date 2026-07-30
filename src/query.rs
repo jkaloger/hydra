@@ -102,10 +102,16 @@ pub struct Counts {
 /// Serialized directly, the fields come out in declaration order, which puts the
 /// cheap orienting ones first and `hydrated` last so a truncated dump still
 /// reads. Going via `serde_json::Value` — as `store::to_json` does for §3's
-/// sorted keys — re-sorts them to `counts, hydrated, next, skeleton` and throws
+/// sorted keys — re-sorts them to `counts, hydrated, intent, next, skeleton` and throws
 /// that away, so the CLI must serialize this type straight.
 #[derive(Debug, Clone, Serialize)]
 pub struct Resume {
+    /// The tree's stated purpose (§3), verbatim, ahead of everything else: on a
+    /// cold start it is what the rest of the payload is read against, and
+    /// inferring it from the skeleton's question/summary pairs is a guess that
+    /// looks the same whether it landed or not. Empty for a tree written before
+    /// the field existed.
+    pub intent: String,
     pub counts: Counts,
     /// `None` when the tree is done or empty, or when every open head is
     /// blocked.
@@ -376,6 +382,7 @@ pub fn resume(tree: &Tree) -> Resume {
         None => vec![],
     };
     Resume {
+        intent: tree.intent.clone(),
         counts: status(tree),
         next,
         skeleton: skeleton(tree),
@@ -398,7 +405,7 @@ mod tests {
     use crate::graph::{self, CAUTERISED, Cauterise, Cut, Sprout};
 
     fn tree() -> Tree {
-        Tree::new("t".to_string())
+        Tree::new("t".to_string(), "test intent".to_string())
     }
 
     fn add(tree: &mut Tree, slug: &str, parent: Option<&str>) {
@@ -854,10 +861,13 @@ mod tests {
     #[test]
     fn resume_field_order_is_pinned() {
         let json = serde_json::to_string(&resume(&fanned())).unwrap();
-        assert!(json.starts_with(r#"{"counts":{"tree":"t","#), "{json}");
+        assert!(
+            json.starts_with(r#"{"intent":"test intent","counts":"#),
+            "{json}"
+        );
 
         let mut at = 0;
-        for key in ["counts", "next", "skeleton", "hydrated"] {
+        for key in ["intent", "counts", "next", "skeleton", "hydrated"] {
             let found = json
                 .find(&format!("\"{key}\":"))
                 .unwrap_or_else(|| panic!("no {key} in {json}"));

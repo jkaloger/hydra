@@ -123,6 +123,7 @@ Git is the event log. Building an append-only log inside a git-tracked file is b
 {
   "version": 1,
   "slug": "hydra-design",
+  "intent": "Design hydra itself: what it stores, what it refuses, what it looks like from outside.",
   "created_at": "2026-07-28T04:11:02Z",
   "heads": {
     "graph-shape": {
@@ -151,6 +152,18 @@ Git is the event log. Building an append-only log inside a git-tracked file is b
 Sibling order is `seq`, an integer. Pre-order walk = depth-first, siblings ascending by `seq`. No `children` array — parent pointer plus `seq` is the single source of truth, so there is no ordering to desync.
 
 `prior` holds the single most recent superseded answer. Deeper history is git's job.
+
+### Intent
+
+`intent` is prose saying what the interview is for. Required at `init`, blank refused, and hydra never reads it — same standing as question text (§4).
+
+It sits at the tree level rather than the head level because it is not a decision: nothing gates on it, nothing cascades from it, and it can be restated without reopening anything. A head's answer needs `prior` and a cascade; a purpose does not.
+
+Without it, a resumed tree has no statement of purpose, and a cold start reconstructs one from the skeleton's question/summary pairs. That inference is right when the questions happen to triangulate purpose and wrong otherwise, and the two cases are indistinguishable from the payload.
+
+Mutable in the file, which is hand-editable and git-tracked (§3) — there is no `hydra intent` verb. Accepted cost: a stale intent is confidently wrong rather than absent, which is the failure above moved from inference to storage, and only the git diff catches it.
+
+Additive and nullable, so it does not bump `version`: a tree written before the field existed loads with `intent` empty. Empty therefore means "predates the field" and is distinguishable from prose.
 
 ---
 
@@ -187,7 +200,7 @@ JSON on stdout for everything except `tree`, which is for eyes.
 ### Tree management
 
 ```
-hydra init [<slug>]                      create tree, point HEAD at it
+hydra init [<slug>] --intent <text|->    create tree, point HEAD at it
 hydra use <slug>                         move HEAD
 hydra trees                              list trees, open counts
 hydra status                             counts; exit nonzero while open heads remain
@@ -208,7 +221,7 @@ hydra link <slug> --blocked-by <slug>
 hydra unlink <slug> --blocked-by <slug>
 ```
 
-`--answer -` reads stdin. Answers and rationales are prose and will contain quotes; stdin is the sane path for anything long.
+`--answer -` reads stdin. Answers, rationales and intent are prose and will contain quotes; stdin is the sane path for anything long.
 
 ### Query
 
@@ -289,6 +302,8 @@ A model that drifts into summarising mid-interview loses nothing but the turn. T
 
 ## 7. Resume
 
+**Intent** — the tree's `intent` (§3), verbatim, first in the payload. What the other two tiers are read against.
+
 Two tiers, because a 200-head tree with rationale, rejected and prior is easily 20k tokens and 90% of it is settled branches irrelevant to the next question.
 
 **Skeleton** — every head: slug, question, status, and the _first line_ of `answer.text`. About 15 tokens each; 200 heads ≈ 3k. Enough global awareness to stop the LLM re-asking something settled in a distant branch, which `ready` cannot catch because that duplication is semantic, not structural.
@@ -357,6 +372,7 @@ Taken as recommended, not explicitly ratified:
 - ULID + slug identity (§2) over hierarchical numbering.
 - First line of `answer.text` as the skeleton summary (§7).
 - `prior` holds one superseded answer, not a stack (§3).
+- No `hydra intent` verb; the field is fixed at `init` and otherwise hand-edited (§3).
 
 Open:
 

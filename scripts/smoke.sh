@@ -112,25 +112,32 @@ echo
 echo "== init"
 mkdir -p "$WORK/smoke-repo"
 cd "$WORK/smoke-repo"
-run 0 init
+run 0 init --intent 'Smoke the CLI end to end.'
 jqok '.op == "init" and .tree == "smoke-repo"'
 jqok '.counts.done == true and .counts.open == 0'
 jqok 'has("slug") == false'
 same "$(cat .hydra/HEAD)" "smoke-repo" "init points HEAD at the tree it made"
 [ -f .hydra/smoke-repo.json ] || fail "init should have written the tree file"
 
-run 0 init hydra-design
+run 0 init hydra-design --intent 'Design hydra itself: storage, invariants, surface.'
 jqok '.tree == "hydra-design"'
 same "$(cat .hydra/HEAD)" "hydra-design" "init moves HEAD"
 
-run 5 init hydra-design
+run 5 init hydra-design --intent 'Design hydra itself: storage, invariants, surface.'
 stdout_empty
 err_has "already exists"
+
+echo "-- --intent is required, and blank does not satisfy it"
+run 2 init no-intent
+err_has "--intent"
+run 2 init blank-intent --intent '   '
+err_has "blank"
+[ ! -f .hydra/blank-intent.json ] || fail "a refused init should not have made a tree"
 
 echo
 echo "== init from a subdirectory adopts the store above it"
 mkdir -p sub/deep
-(cd sub/deep && "$BIN" init nested >"$OUT" 2>"$ERR") || fail "nested init should succeed"
+(cd sub/deep && "$BIN" init nested --intent 'Exercise store adoption from a subdirectory.' >"$OUT" 2>"$ERR") || fail "nested init should succeed"
 STEP="hydra init nested (in sub/deep)"
 err_has "using the store at"
 [ ! -d sub/deep/.hydra ] || fail "a nested .hydra/ would shadow the store above it"
@@ -139,7 +146,7 @@ jqok '.tree == "nested"'
 echo "-- the default slug comes from the store's directory, not the cwd, so a"
 echo "   bare init from a subdirectory is a duplicate rather than a new tree"
 code=0
-(cd sub/deep && "$BIN" init >"$OUT" 2>"$ERR") || code=$?
+(cd sub/deep && "$BIN" init --intent 'Exercise the default slug.' >"$OUT" 2>"$ERR") || code=$?
 STEP="hydra init (in sub/deep)"
 [ "$code" -eq 5 ] || fail "expected exit 5, got $code"
 err_has "tree 'smoke-repo' already exists"
@@ -174,6 +181,7 @@ run 0 next
 jqok '. == null'
 run 0 resume
 jqok '.counts.done == true and .next == null and .skeleton == [] and .hydrated == []'
+jqok '.intent == "Exercise store adoption from a subdirectory."'
 run 0 status
 jqok '.done == true'
 stderr_empty
@@ -516,7 +524,8 @@ err_has "no head 'ghost'"
 
 run 0 resume
 echo "-- §7's field order is deliberate; a Value round-trip would sort it"
-same "$(jqv 'keys_unsorted | join(",")')" "counts,next,skeleton,hydrated" "resume field order"
+same "$(jqv 'keys_unsorted | join(",")')" "intent,counts,next,skeleton,hydrated" "resume field order"
+jqok '.intent == "Design hydra itself: storage, invariants, surface."'
 jqok '.counts.tree == "hydra-design"'
 jqok '(.skeleton | length) == 9'
 echo "-- depth first, siblings by seq (§3) — not the slug order the file is keyed by"
