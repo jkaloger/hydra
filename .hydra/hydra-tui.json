@@ -1,0 +1,366 @@
+{
+  "created_at": "2026-07-30T01:03:50Z",
+  "heads": {
+    "concurrency": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "a glance-able live dashboard should update near-instantly without idle cost; polling wastes forks when the tree sits untouched between agent turns",
+        "rejected": [
+          {
+            "option": "poll on timer",
+            "why_not": "wastes cycles/forks when idle, laggy at long intervals"
+          },
+          {
+            "option": "manual refresh only",
+            "why_not": "defeats the point of a live dashboard"
+          }
+        ],
+        "text": "file-watch the store, re-run hydra resume on change\nWatch .hydra/<slug>.json (and its lockfile) for write events; debounce against the lock's rename/write dance so a mid-write state never triggers a refresh."
+      },
+      "blocked_by": [
+        "data-access"
+      ],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T31NN6AA9QK124451SH3",
+      "parent": "data-access",
+      "prior": null,
+      "question": "What happens when the TUI and an agent both touch the same tree at once (lockfile contention, live reload)?",
+      "rev": 1,
+      "seq": 1,
+      "slug": "concurrency",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:12:44Z"
+    },
+    "data-access": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "CLI JSON output is the stable interface hydra already exposes to agents; a read-only viewer has no reason to couple to internal Rust types or the on-disk format",
+        "rejected": [
+          {
+            "option": "link hydra-core as library",
+            "why_not": "couples build to internal crate boundaries, same-workspace requirement"
+          },
+          {
+            "option": "read JSON store directly",
+            "why_not": "duplicates hydra read logic, breaks silently on format change"
+          }
+        ],
+        "text": "shell out to hydra CLI subprocess\nSame JSON interface an agent uses; re-invoked on refresh trigger (poll/watch settled under concurrency)."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T31FREFHGNXS6929CRYE",
+      "parent": null,
+      "prior": null,
+      "question": "How does the TUI read tree state — shell out to the hydra CLI, or link hydra-core as a library?",
+      "rev": 1,
+      "seq": 2,
+      "slug": "data-access",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:09:06Z"
+    },
+    "distribution": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "data-access already settled on CLI subprocess + JSON, not shared Rust types, so no code-sharing reason to force one binary; same workspace gets lean CLI deps without inventing a version-compat matrix between two independently-released things",
+        "rejected": [
+          {
+            "option": "hydra tui subcommand",
+            "why_not": "forces ratatui/crossterm as transitive deps on every CLI user, ties TUI release cadence to CLI"
+          },
+          {
+            "option": "separate repo/crate",
+            "why_not": "no enforced pairing between TUI and CLI JSON schema versions"
+          }
+        ],
+        "text": "separate binary, same cargo workspace\nTwo [[bin]] targets, one Cargo.toml workspace, built/released from the same commit — schema drift between hydra and hydra-tui structurally impossible."
+      },
+      "blocked_by": [
+        "data-access"
+      ],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T32VJTM9C9AJE36H2WYD",
+      "parent": "framework",
+      "prior": null,
+      "question": "Is the TUI a subcommand of the hydra binary, or a separate crate/binary?",
+      "rev": 1,
+      "seq": 1,
+      "slug": "distribution",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:21:33Z"
+    },
+    "error-display": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "file-watch already expects to hit hydra mid-write/lock-held routinely as normal operation, not fatal; last-good render should stay visible through a transient hiccup",
+        "rejected": [
+          {
+            "option": "blocking modal",
+            "why_not": "blocks the last-good view exactly when something is wrong with the connection to it"
+          },
+          {
+            "option": "crash-to-stderr",
+            "why_not": "throws away the dashboard over a transient lock/mid-write hiccup a watcher should tolerate"
+          }
+        ],
+        "text": "inline status line, TUI stays up\nPersistent status line shows last error (tree gone, lock busy, subprocess not found); last-good render stays on screen underneath."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T3394RC8EZ4W6DYEZH5N",
+      "parent": null,
+      "prior": null,
+      "question": "How do hydra CLI failures (exit 5 tree gone, exit 1 I/O/lock, subprocess not found) surface in the TUI?",
+      "rev": 1,
+      "seq": 6,
+      "slug": "error-display",
+      "status": "answered",
+      "updated_at": "2026-07-30T02:21:12Z"
+    },
+    "framework": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "shares hydra own toolchain (cargo, repo, build); no second language install just to parse a JSON stream a subprocess already emits",
+        "rejected": [
+          {
+            "option": "Go+bubbletea",
+            "why_not": "second toolchain, no shared code with a Rust CLI"
+          },
+          {
+            "option": "Python+textual",
+            "why_not": "second toolchain plus a runtime dep the CLI user does not otherwise need"
+          }
+        ],
+        "text": "Rust + ratatui\ncrossterm backend, serde for JSON parsing of hydra subprocess output."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T32KGKN512C6TCEXQ834",
+      "parent": null,
+      "prior": null,
+      "question": "What language/toolkit builds the TUI (e.g. ratatui, given hydra itself is a Rust binary)?",
+      "rev": 1,
+      "seq": 4,
+      "slug": "framework",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:19:33Z"
+    },
+    "history-view": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "prior/cauterised_by already come free in hydra show output; a passive dashboard earns its keep over raw CLI by surfacing that trail without an extra keypress or a second hydra show call",
+        "rejected": [
+          {
+            "option": "current-state only",
+            "why_not": "hides the why-did-this-change trail the skill relies on"
+          },
+          {
+            "option": "toggle-key on-demand",
+            "why_not": "extra keybinding and two-state pane for data that costs nothing extra to show"
+          }
+        ],
+        "text": "full history pane by default\nDetail pane for a selected row shows current answer plus prior (pre-reopen) and cauterised_by, as a small timeline, no extra keypress needed."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T32B4Q7P6DR358SJAS4D",
+      "parent": "render-model",
+      "prior": null,
+      "question": "Is there a view for prior/cauterised/reopened history, or only the current head state?",
+      "rev": 1,
+      "seq": 2,
+      "slug": "history-view",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:18:06Z"
+    },
+    "interaction": {
+      "answer": {
+        "cauterised_by": "scope",
+        "rationale": "scope settled read-only; there is no answer path in the TUI for this question to apply to.",
+        "rejected": [],
+        "text": "cauterised"
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T319SZ17Y7NVF39YTGYG",
+      "parent": "scope",
+      "prior": null,
+      "question": "If interactive, how does the user answer a head (inline form vs shelling to $EDITOR for prose fields)?",
+      "rev": 1,
+      "seq": 1,
+      "slug": "interaction",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:06:35Z"
+    },
+    "multi-tree": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "covers which tree to open without committing to the extra complexity of multiple concurrent watchers/subprocess state a live switcher would need",
+        "rejected": [
+          {
+            "option": "single tree per launch via CLI arg",
+            "why_not": "no discoverability, has to already know the slug"
+          },
+          {
+            "option": "live in-session switcher",
+            "why_not": "solves juggling several concurrent interviews, a problem that has not come up in this design"
+          }
+        ],
+        "text": "tree picker on launch, single tree per session\nOpens on hydra trees list; Enter drills into chosen tree. Switching trees means quitting and relaunching."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T332VGD4AWHCP17TZS38",
+      "parent": null,
+      "prior": null,
+      "question": "Can the TUI switch between multiple trees, and how are they listed?",
+      "rev": 1,
+      "seq": 5,
+      "slug": "multi-tree",
+      "status": "answered",
+      "updated_at": "2026-07-30T02:19:28Z"
+    },
+    "navigation": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "terminal-tool audience already expects vim keys; fold/expand earns its keep on a real dozen-plus-head tree where an answered branch is noise once settled",
+        "rejected": [
+          {
+            "option": "arrow-keys tree",
+            "why_not": "same structural cost as vim-tree, worse fit for the likely audience"
+          },
+          {
+            "option": "vim-style flat list",
+            "why_not": "no way to collapse an answered branch, gets noisy on a large tree"
+          }
+        ],
+        "text": "vim-style keys (j/k/g/G/search), foldable tree rows\nCollapse/expand state tracked per parent row; indent/nesting comes from the JSON skeleton's parent field."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T324AP7ECA50E2J9ZHR5",
+      "parent": "render-model",
+      "prior": null,
+      "question": "What is the navigation/keybinding model (vim-style vs arrows, tree vs flat list)?",
+      "rev": 1,
+      "seq": 1,
+      "slug": "navigation",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:17:30Z"
+    },
+    "render-model": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "JSON is needed anyway for selection state and file-watch diffing; building rows on top of it avoids a second tree-renderer drifting from the CLI ASCII rules",
+        "rejected": [
+          {
+            "option": "raw ASCII dump",
+            "why_not": "no per-row selection or scroll-to-node"
+          },
+          {
+            "option": "fully custom widget re-deriving glyphs/indent",
+            "why_not": "duplicates CLI drawing rules, risks drift"
+          }
+        ],
+        "text": "JSON-driven selectable rows, reusing the CLI's own glyphs/labels\nParse hydra resume's skeleton into rows; keep each row's status glyph and summary text verbatim from the JSON rather than re-deriving them."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T31X3QXERP68SY239WXP",
+      "parent": null,
+      "prior": null,
+      "question": "How is the tree rendered — reuse the `hydra tree` ASCII output, or a custom graph widget?",
+      "rev": 1,
+      "seq": 3,
+      "slug": "render-model",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:16:47Z"
+    },
+    "scope": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "agent-crafted options + rationale before every cut is core to the interview protocol; a TUI form cannot fake that judgment well, and a second mutation path complicates reopened[] cascades",
+        "rejected": [
+          {
+            "option": "full interactive",
+            "why_not": "TUI would recreate cut-time option/tradeoff judgment poorly"
+          },
+          {
+            "option": "hybrid (cheap ops from TUI)",
+            "why_not": "adds a second mutation path to reason about for cascades"
+          }
+        ],
+        "text": "read-only dashboard\nAgent/CLI stays the only writer; TUI is eyes on the tree only."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T30YMQT6HPM5T72ZVJDV",
+      "parent": null,
+      "prior": null,
+      "question": "What does the TUI let a user do — read-only dashboard, or full interactive answer/cut/sprout?",
+      "rev": 1,
+      "seq": 1,
+      "slug": "scope",
+      "status": "answered",
+      "updated_at": "2026-07-30T01:06:27Z"
+    },
+    "testing": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "render layer is already JSON-driven (render-model), not subprocess-driven for visuals; TestBackend + fixture JSON tests exactly the state worth protecting (fold state, selection, history pane) without real file-watch timing flakiness",
+        "rejected": [
+          {
+            "option": "real-subprocess integration tests",
+            "why_not": "slower, flaky on real file-watch timing, exercises a path (subprocess spawn) with little design risk"
+          },
+          {
+            "option": "no dedicated tests",
+            "why_not": "enough state combinations (fold/selection/history/status-line) that regressions would go unnoticed"
+          }
+        ],
+        "text": "ratatui TestBackend + snapshot assertions\nRender into in-memory buffer, feed synthetic key events, assert/diff buffer contents; fixture JSON stands in for hydra subprocess output."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T33G8TRG43B17N1YXCRB",
+      "parent": null,
+      "prior": null,
+      "question": "How is the TUI tested (snapshot testing, scripted key-sequences)?",
+      "rev": 1,
+      "seq": 7,
+      "slug": "testing",
+      "status": "answered",
+      "updated_at": "2026-07-30T02:22:00Z"
+    },
+    "theming": {
+      "answer": {
+        "cauterised_by": null,
+        "rationale": "glyphs already carry the meaning; color is a scan-ability layer on top, no need for NO_COLOR/background-detection cross-cutting logic on a tool already correct without it",
+        "rejected": [
+          {
+            "option": "no theming",
+            "why_not": "leaves scan-ability on the table for free"
+          },
+          {
+            "option": "full NO_COLOR/background-aware theming",
+            "why_not": "adds env detection and background sniffing for decoration, not information"
+          }
+        ],
+        "text": "fixed ANSI color scheme, no NO_COLOR/background detection\nColor layered on top of existing glyphs for scan-ability (e.g. green=answered, yellow=blocked, red=cauterised); glyphs remain the source of truth."
+      },
+      "blocked_by": [],
+      "created_at": "2026-07-30T01:04:21Z",
+      "id": "01KYR8T33NDB6WMH5VQA37K0VS",
+      "parent": null,
+      "prior": null,
+      "question": "Is there a theme/color scheme, and does it respect terminal light/dark or NO_COLOR?",
+      "rev": 1,
+      "seq": 8,
+      "slug": "theming",
+      "status": "answered",
+      "updated_at": "2026-07-30T02:23:01Z"
+    }
+  },
+  "slug": "hydra-tui",
+  "version": 1
+}
