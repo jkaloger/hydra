@@ -474,7 +474,7 @@ fn run(command: Command) -> anyhow::Result<i32> {
             // Not `print!`: `std::io::_print` panics on a write failure, and this
             // is the output most likely to be piped. `render` already ends in a
             // newline.
-            write_stdout(&render(&tree, colour()))?;
+            write_stdout(&render(&tree, colour(), width()))?;
         }
     }
     Ok(exit::OK)
@@ -625,6 +625,17 @@ fn colour() -> render::Colour {
     } else {
         render::Colour::Plain
     }
+}
+
+/// The line budget for `tree`, on the same rule as `colour` and for the same
+/// reason: a terminal has an edge to overflow and a pipe does not. A terminal
+/// whose size cannot be read is treated as a pipe.
+fn width() -> Option<usize> {
+    io::stdout()
+        .is_terminal()
+        .then(terminal_size::terminal_size)
+        .flatten()
+        .map(|(terminal_size::Width(columns), _)| usize::from(columns))
 }
 
 /// The only place stdout is written — `tree` included, even though it is the one

@@ -15,5 +15,6 @@ serde = { version = "1.0.229", features = ["derive"] }
 # and the stable-diff property goes with it.
 serde_json = "1.0.151"
 tempfile = "3.27.0"
+terminal_size = "0.4.4"
 thiserror = "2.0.19"
 ulid = { version = "3.0.0", features = ["serde"] }

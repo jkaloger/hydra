@@ -254,6 +254,8 @@ hydra-design  (14 answered, 6 open)
 
 Connectors as `tree(1)` draws them, with the header line as the root every top-level head hangs off — so nesting is drawn rather than implied by indent, and a subtree reads as one block at any depth. Summaries share one character column, measured on characters rather than bytes.
 
+A summary too long for the terminal wraps into that column rather than running past the edge, and every vertical crossing that line is redrawn on it: bars for the sibling sets still open, blanks for the ones closed, and one more bar where the next row is a child. That last bar is the one a child's connector points up at. Unwrapped it points at the parent row itself, which is why `tree(1)` never draws it; with a wrapped summary in between there is nothing there to point at. The width is the terminal's, on the same rule as the colour: a pipe has no edge to overflow, so a pipe gets the summary whole. A terminal too narrow to leave a usable column is treated as a pipe; wrapping into four characters loses more than the overflow does.
+
 Colour when stdout is a terminal, and only then: glyph in its state's colour (answered green, ready bold cyan, blocked yellow, cauterised dim red), connectors and summaries dimmed, `← next` bold. `NO_COLOR` disables it. The escapes are zero-width to the terminal and non-zero to a string length, so the column is measured on the plain text and the paint applied after.
 
 ---

@@ -29,6 +29,12 @@ const GAP: &str = "    ";
 /// summary column, measured off §5's example.
 const GUTTER: usize = 3;
 
+/// The narrowest summary column worth wrapping into. Below this the wrap does
+/// more damage than the overflow it prevents — a deep tree in a narrow terminal
+/// would spend a line per word — so the render stops wrapping and lets the
+/// terminal do what it was going to do anyway.
+const MIN_SUMMARY: usize = 16;
+
 /// Whether to dress the render in ANSI. The caller decides — a pipe gets
 /// `Plain` — so nothing in here reads the environment or asks about the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +71,10 @@ const MARKER: &str = "1";
 
 struct Row {
     prefix: String,
+    /// The connector column as it is redrawn under this row: every vertical
+    /// crossing the gap to the next row. A wrapped summary hangs off this, so
+    /// the tree survives a row taller than one line.
+    continuation: String,
     state: State,
     slug: String,
     summary: String,
@@ -81,19 +91,23 @@ struct Row {
     width: usize,
 }
 
-pub fn render(tree: &Tree, colour: Colour) -> String {
+/// `width` is the line budget in characters, and `None` is no budget at all: a
+/// pipe has no width to overflow, so it gets the untruncated render the same way
+/// it gets the unpainted one.
+pub fn render(tree: &Tree, colour: Colour, width: Option<usize>) -> String {
     let counts = query::status(tree);
     let next = query::next_slug(tree);
     let visits = query::preorder(tree);
     let rows: Vec<Row> = prefixes(&visits)
         .into_iter()
         .zip(&visits)
-        .map(|(prefix, visit)| {
+        .map(|((prefix, continuation), visit)| {
             let state = query::state(tree, visit.head);
             let is_next = next == Some(visit.slug);
             Row {
                 width: prefix.chars().count() + 2 + visit.slug.chars().count(),
                 prefix,
+                continuation,
                 state,
                 slug: visit.slug.to_string(),
                 // The marker owns the column outright rather than being appended
@@ -116,6 +130,12 @@ pub fn render(tree: &Tree, colour: Colour) -> String {
         .map(|row| row.width)
         .max()
         .map_or(0, |longest| longest + GUTTER);
+    // One budget for the whole render, not one per row: the summary column is
+    // shared, so the wrap width has to be too, or two rows of the same answer
+    // length would break in different places.
+    let budget = width
+        .map(|width| width.saturating_sub(column))
+        .filter(|budget| *budget >= MIN_SUMMARY);
 
     let mut out = format!(
         "{}  ({} answered, {} open)\n",
@@ -130,37 +150,106 @@ pub fn render(tree: &Tree, colour: Colour) -> String {
         // the padding leading up to it is not worth committing to a file.
         if !row.summary.is_empty() {
             let sgr = if row.next { MARKER } else { STRUCTURE };
+            let mut lines = wrap(&row.summary, budget).into_iter();
             out.push_str(&" ".repeat(column - row.width));
-            out.push_str(&colour.paint(sgr, &row.summary));
+            out.push_str(&colour.paint(sgr, &lines.next().unwrap_or_default()));
+            for line in lines {
+                out.push('\n');
+                out.push_str(&colour.paint(STRUCTURE, &row.continuation));
+                out.push_str(&" ".repeat(column - row.continuation.chars().count()));
+                out.push_str(&colour.paint(sgr, &line));
+            }
         }
         out.push('\n');
     }
     out
 }
 
-/// The connector column for each visit, in the order they were walked.
+/// The summary broken to fit `budget` characters, or left whole when there is no
+/// budget. Breaks on spaces, and inside a word only when the word alone will not
+/// fit — a URL or a `answer{text, rationale}` is worth splitting mid-token
+/// rather than letting it run past the edge, which is the overflow the budget
+/// exists to prevent.
+///
+/// Characters, not bytes, for the reason `Row::width` gives.
+fn wrap(summary: &str, budget: Option<usize>) -> Vec<String> {
+    let Some(budget) = budget else {
+        return vec![summary.to_string()];
+    };
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut used = 0;
+    for word in summary.split(' ').filter(|word| !word.is_empty()) {
+        let length = word.chars().count();
+        if used > 0 && used + 1 + length > budget {
+            lines.push(std::mem::take(&mut line));
+            used = 0;
+        }
+        if used > 0 {
+            line.push(' ');
+            used += 1;
+        }
+        if length <= budget - used {
+            line.push_str(word);
+            used += length;
+            continue;
+        }
+        for c in word.chars() {
+            if used == budget {
+                lines.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            line.push(c);
+            used += 1;
+        }
+    }
+    lines.push(line);
+    lines
+}
+
+/// The connector column for each visit, in the order they were walked, paired
+/// with the column that stands under it once the row's own line is spent.
 ///
 /// A row's own connector says whether it closes its sibling set; the connectors
 /// above it are replayed as bars or blanks, which is what makes a subtree read as
 /// one block. Depth-0 heads are siblings of each other under the header line, so
 /// they are drawn like any other sibling set — including the entry points
 /// `preorder` invents for a hand-edited parent cycle, which arrive at depth 0.
-fn prefixes(visits: &[Visit<'_>]) -> Vec<String> {
+///
+/// The continuation is every vertical that crosses the gap between this row and
+/// the next: the row's own connector resolved the way the row below resolves it,
+/// and one more bar when the row below is a child rather than a sibling. That
+/// last bar is the one a connector's up-stroke lands on. Unwrapped, it lands on
+/// the parent row itself one line above, which is why `tree(1)` never draws it;
+/// with a wrapped summary in between there is nothing there to land on, and the
+/// child reads as detached from its parent.
+fn prefixes(visits: &[Visit<'_>]) -> Vec<(String, String)> {
     let last = closes_its_sibling_set(visits);
     // Last-ness of each row on the path from depth 0 down to the current row.
     let mut path: Vec<bool> = Vec::new();
     visits
         .iter()
         .zip(&last)
-        .map(|(visit, closes)| {
+        .enumerate()
+        .map(|(at, (visit, closes))| {
             path.truncate(visit.depth);
             let mut prefix = String::with_capacity(GAP.len() * (visit.depth + 1));
             for ancestor_closes in &path {
                 prefix.push_str(if *ancestor_closes { GAP } else { BAR });
             }
+            let mut continuation = prefix.clone();
+            continuation.push_str(if *closes { GAP } else { BAR });
+            // Pre-order only ever descends one level at a time, so a deeper row
+            // next is a child of this one.
+            if visits
+                .get(at + 1)
+                .is_some_and(|next| next.depth > visit.depth)
+            {
+                continuation.push_str(BAR);
+            }
             prefix.push_str(if *closes { ELBOW } else { TEE });
             path.push(*closes);
-            prefix
+            (prefix, continuation)
         })
         .collect()
 }
@@ -243,9 +332,11 @@ mod tests {
     }
 
     /// The render every test but the colour ones reads, since §5's layout is a
-    /// property of the plain text and the ANSI is a coat of paint over it.
+    /// property of the plain text and the ANSI is a coat of paint over it. No
+    /// budget: the layout tests are about the column, and the wrap tests set
+    /// their own width.
     fn plain(tree: &Tree) -> String {
-        render(tree, Colour::Plain)
+        render(tree, Colour::Plain, None)
     }
 
     /// The tree §5's example block renders. The header counts there belong to a
@@ -531,6 +622,201 @@ t  (0 answered, 3 open)
         );
     }
 
+    /// The tree the wrap tests read: two depths and two sibling sets, so the
+    /// continuation column has both a bar and a blank to get right.
+    fn wordy() -> Tree {
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
+        cut(
+            &mut t,
+            "data-access",
+            None,
+            "shell out to hydra CLI subprocess",
+        );
+        cut(
+            &mut t,
+            "concurrency",
+            Some("data-access"),
+            "file-watch the store, re-run hydra resume on change",
+        );
+        cut(
+            &mut t,
+            "theming",
+            None,
+            "fixed ANSI colour scheme, no NO_COLOR",
+        );
+        t
+    }
+
+    #[test]
+    fn a_long_summary_wraps_into_its_own_column() {
+        assert_eq!(
+            render(&wordy(), Colour::Plain, Some(48)),
+            "\
+t  (3 answered, 0 open)
+├── ● data-access       shell out to hydra CLI
+│   │                   subprocess
+│   └── ● concurrency   file-watch the store,
+│                       re-run hydra resume on
+│                       change
+└── ● theming           fixed ANSI colour
+                        scheme, no NO_COLOR
+"
+        );
+    }
+
+    /// The wrap is what keeps the connectors in one column, so every line of it
+    /// has to be inside the budget — the overflow it exists to prevent is a
+    /// terminal wrapping a row and putting half a summary under the bars.
+    #[test]
+    fn no_line_exceeds_the_budget() {
+        for budget in [40, 48, 60, 100] {
+            for line in render(&wordy(), Colour::Plain, Some(budget)).lines() {
+                assert!(
+                    line.chars().count() <= budget,
+                    "{budget}: {line:?} is {} characters",
+                    line.chars().count()
+                );
+            }
+        }
+    }
+
+    /// A budget wide enough for every summary must leave the render identical to
+    /// the unbudgeted one, down to the absence of trailing space.
+    #[test]
+    fn a_wide_budget_changes_nothing() {
+        let tree = wordy();
+        assert_eq!(
+            render(&tree, Colour::Plain, Some(200)),
+            render(&tree, Colour::Plain, None)
+        );
+    }
+
+    /// A pipe has no edge to overflow, so it is handed the summary whole — the
+    /// same reason it is handed the text unpainted.
+    #[test]
+    fn no_budget_leaves_the_summary_on_one_line() {
+        assert_eq!(render(&wordy(), Colour::Plain, None).lines().count(), 4);
+    }
+
+    /// Under `MIN_SUMMARY` the wrap is abandoned rather than narrowed: a column
+    /// two characters wide is a worse render than an overflowing one.
+    #[test]
+    fn a_budget_too_narrow_to_wrap_into_is_ignored() {
+        let tree = wordy();
+        let narrow = 30;
+        assert!(
+            narrow - MIN_SUMMARY < "├── ● data-access   ".chars().count(),
+            "the column has to leave less than MIN_SUMMARY for this to test anything"
+        );
+        assert_eq!(
+            render(&tree, Colour::Plain, Some(narrow)),
+            render(&tree, Colour::Plain, None)
+        );
+    }
+
+    /// A word with no space to break at is broken anyway. Leaving it whole would
+    /// put it back past the edge, which is the one thing the budget is for.
+    #[test]
+    fn a_word_longer_than_the_column_is_broken_mid_word() {
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
+        cut(
+            &mut t,
+            "url",
+            None,
+            "see https://example.invalid/a/very/long/path/indeed",
+        );
+
+        assert_eq!(
+            render(&t, Colour::Plain, Some(30)),
+            "\
+t  (1 answered, 0 open)
+└── ● url   see
+            https://example.in
+            valid/a/very/long/
+            path/indeed
+"
+        );
+    }
+
+    /// The continuation is the connector column of the row below, not of the row
+    /// itself: the elbow that closed a set becomes blank, and a tee stays a bar.
+    #[test]
+    fn the_continuation_closes_the_sets_the_row_closed() {
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
+        cut(&mut t, "open-set", None, "one two three four five");
+        add(&mut t, "sibling", None);
+
+        let out = render(&t, Colour::Plain, Some(35));
+        assert!(out.contains("\n│                five\n"), "{out}");
+
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
+        add(&mut t, "sibling", None);
+        cut(&mut t, "closed-set", None, "one two three four five");
+
+        let out = render(&t, Colour::Plain, Some(35));
+        assert!(out.contains("\n                   four five\n"), "{out}");
+    }
+
+    /// A child's connector points up at the line above it. When its parent's
+    /// summary wraps, the line above is no longer the parent — so the rail has
+    /// to be carried down through the wrap or the child reads as detached.
+    #[test]
+    fn a_wrapped_parent_carries_the_rail_down_to_its_child() {
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
+        cut(&mut t, "parent", None, "one two three four five six");
+        cut(&mut t, "child", Some("parent"), "short");
+        cut(&mut t, "sibling", None, "short");
+
+        assert_eq!(
+            render(&t, Colour::Plain, Some(40)),
+            "\
+t  (3 answered, 0 open)
+├── ● parent      one two three four
+│   │             five six
+│   └── ● child   short
+└── ● sibling     short
+"
+        );
+    }
+
+    /// The same rail, on a parent that closes its own sibling set: the column it
+    /// was drawn in goes blank and the child's rail is all that is left.
+    #[test]
+    fn a_last_child_parent_carries_only_the_childs_rail() {
+        let mut t = Tree::new("t".to_string(), "test intent".to_string());
+        cut(&mut t, "sibling", None, "short");
+        cut(&mut t, "parent", None, "one two three four five six");
+        cut(&mut t, "child", Some("parent"), "short");
+
+        assert_eq!(
+            render(&t, Colour::Plain, Some(40)),
+            "\
+t  (3 answered, 0 open)
+├── ● sibling     short
+└── ● parent      one two three four
+    │             five six
+    └── ● child   short
+"
+        );
+    }
+
+    /// Each wrapped line is painted on its own, so the escapes open and close
+    /// inside the line rather than spanning the newline — a pager that reads one
+    /// line at a time has to see a complete sequence.
+    #[test]
+    fn colour_survives_the_wrap() {
+        let tree = wordy();
+        assert_eq!(
+            strip_ansi(&render(&tree, Colour::Ansi, Some(48))),
+            render(&tree, Colour::Plain, Some(48))
+        );
+        assert!(
+            render(&tree, Colour::Ansi, Some(48))
+                .contains("\u{1b}[2m│   │   \u{1b}[0m                \u{1b}[2msubprocess\u{1b}[0m"),
+            "the continuation bar is structure and the wrapped text is summary"
+        );
+    }
+
     fn strip_ansi(text: &str) -> String {
         let mut out = String::new();
         let mut chars = text.chars();
@@ -554,7 +840,7 @@ t  (0 answered, 3 open)
     #[test]
     fn colour_does_not_move_the_column() {
         let tree = spec_example();
-        assert_eq!(strip_ansi(&render(&tree, Colour::Ansi)), plain(&tree));
+        assert_eq!(strip_ansi(&render(&tree, Colour::Ansi, None)), plain(&tree));
     }
 
     #[test]
@@ -564,7 +850,7 @@ t  (0 answered, 3 open)
 
     #[test]
     fn ansi_paints_the_state_on_the_glyph_and_dims_the_structure() {
-        let out = render(&spec_example(), Colour::Ansi);
+        let out = render(&spec_example(), Colour::Ansi, None);
         assert!(
             out.contains("\u{1b}[2m    │   └── \u{1b}[0m\u{1b}[1;36m○\u{1b}[0m lifecycle"),
             "connectors dim, a ready glyph bold cyan, the slug left alone: {out}"
@@ -589,6 +875,6 @@ t  (0 answered, 3 open)
         add(&mut t, "first", None);
         add(&mut t, "second", None);
 
-        assert!(render(&t, Colour::Ansi).ends_with("\u{1b}[0m second\n"));
+        assert!(render(&t, Colour::Ansi, None).ends_with("\u{1b}[0m second\n"));
     }
 }
