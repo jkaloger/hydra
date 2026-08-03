@@ -548,6 +548,73 @@ same "$(jqv .tree)" "$(cat "$WORK/smoke-repo/.hydra/HEAD")" "mutation .tree vs H
 same "$(jqv .counts.tree)" "$(jqv .tree)" ".counts.tree agrees with .tree"
 
 echo
+echo "== completion candidates come from the store (§5)"
+# The shell's own protocol: `COMPLETE=<shell> hydra -- hydra <words>` with the
+# index of the word under the cursor in the environment. An empty last word is
+# the `<TAB>` pressed after a space.
+comp() {
+  local index="$1"; shift
+  echo "+ COMPLETE=bash _CLAP_COMPLETE_INDEX=$index hydra -- $*"
+  STEP="completion of: $*"
+  COMPLETE=bash _CLAP_COMPLETE_INDEX="$index" _CLAP_IFS=$'\n' \
+    "$BIN" -- "$@" >"$OUT" 2>"$ERR" </dev/null || fail "the completer exited nonzero"
+  stderr_empty
+}
+
+comp_has() {
+  grep -qxF -- "$1" "$OUT" || fail "candidates for '$STEP' should include '$1'"
+}
+
+comp_lacks() {
+  if grep -qxF -- "$1" "$OUT"; then fail "candidates for '$STEP' should not include '$1'"; fi
+}
+
+# Read off the tree rather than hard-coded: the sections above have been
+# cutting and reopening, and which slug is in which state is their business.
+answered="$("$BIN" resume | jq -r '[.skeleton[] | select(.state == "answered")][0].slug')"
+open="$("$BIN" next | jq -r .slug)"
+echo "-- answered: $answered · open: $open"
+
+comp 2 hydra use ''
+comp_has "hydra-design"
+comp_has "smoke-repo"
+comp_lacks "$open"
+
+comp 2 hydra cut ''
+comp_has "$open"
+echo "-- an answered head is offered too: re-answering is a cut, not a rejection"
+comp_has "$answered"
+
+echo "-- reopen and cauterise --by take answered heads only (§4.6, §4.7)"
+comp 2 hydra reopen ''
+comp_has "$answered"
+comp_lacks "$open"
+comp 4 hydra cauterise "$open" --by ''
+comp_has "$answered"
+comp_lacks "$open"
+
+echo "-- a prefix narrows the set the shell would have narrowed anyway"
+comp 2 "hydra" "cut" "${answered:0:3}"
+comp_has "$answered"
+
+echo "-- the element under the cursor completes inside a comma-separated list"
+comp 3 hydra sprout --blocked-by "$answered,"
+comp_has "$answered,$open"
+
+echo "-- zsh gets the state glyph as the description"
+STEP="zsh descriptions"
+COMPLETE=zsh _CLAP_COMPLETE_INDEX=2 _CLAP_IFS=$'\n' \
+  "$BIN" -- hydra cut '' >"$OUT" 2>"$ERR" </dev/null || fail "the completer exited nonzero"
+grep -qF -- "$answered:● " "$OUT" || fail "an answered candidate should be described '● <question>'"
+
+echo "-- outside a store there is nothing to name, and nothing to say about it"
+cd "$WORK/bare"
+comp 2 hydra cut ''
+comp_lacks "$answered"
+comp_has "--answer"
+cd "$WORK/smoke-repo"
+
+echo
 echo "== drive the frontier to done the way a skill would"
 for _ in $(seq 1 20); do
   slug="$("$BIN" next | jq -r '.slug // empty')"

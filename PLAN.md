@@ -54,6 +54,14 @@ Not unit tested (§8). Verified by a manual smoke script over the full verb surf
 
 `claude-plugin/` with `.claude-plugin/plugin.json` and `skills/hydra/SKILL.md` (interview protocol per §6, degrades if `command -v hydra` fails). Data files only: no hooks, no scripts. Plus `.claude-plugin/marketplace.json` at the repo root, sourcing `./claude-plugin`, so the repo installs as a marketplace rather than a one-session `--plugin-dir`.
 
+### I6 — completion
+
+`clap_complete` with `unstable-dynamic`, `clap` with `unstable-ext`. `CompleteEnv::with_factory(Cli::command).complete()` as the first statement of `main`, before anything can touch stdout. `src/complete.rs` beside `main.rs`, not in the lib: the lib stays clap-free.
+
+Two candidate sets — trees and heads — and one narrowing of the second to answered heads, hung on the args of §5 Completion. Heads in pre-order with the state glyph in the description. Every store error swallowed into an empty list. `sprout --blocked-by` needs nothing of its own: the engine splits a delimited value and restores the prefix around whatever the candidate set returns.
+
+Not unit tested (§8). Smoke gains a completion block driving `COMPLETE=bash hydra -- hydra <words>` with `_CLAP_COMPLETE_INDEX` set: tree slugs for `use`, head slugs for `cut`, answered-only for `reopen`, nothing outside a store.
+
 ## Out of scope
 
 Per §1 and §8: no export renderer, no event log, no TUI, no MCP shim, no CLI output-shape tests.

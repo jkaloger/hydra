@@ -258,6 +258,37 @@ A summary too long for the terminal wraps into that column rather than running p
 
 Colour when stdout is a terminal, and only then: glyph in its state's colour (answered green, ready bold cyan, blocked yellow, cauterised dim red), connectors and summaries dimmed, `← next` bold. `NO_COLOR` disables it. The escapes are zero-width to the terminal and non-zero to a string length, so the column is measured on the plain text and the paint applied after.
 
+### Completion
+
+Activated by the environment, not by a verb: `COMPLETE=<shell> hydra` prints shell code registering hydra as its own completer, and every other invocation is untouched. There is no `hydra completions <shell>`, because a verb of that shape emits a static script, and a static script cannot name the heads in a tree — the values worth completing are the ones in `.hydra/`, and they change on every cut.
+
+```sh
+source <(COMPLETE=zsh hydra)      # .zshrc; bash the same
+COMPLETE=fish hydra | source      # .config/fish/completions/hydra.fish
+```
+
+The generated code calls the binary back on every `<TAB>`. That calling convention is not stable across versions, so the code is regenerated at shell start rather than written to a file, and it corrects itself on upgrade.
+
+| Position | Candidates | Description |
+| --- | --- | --- |
+| `use <slug>` | every tree in the store | first line of the tree's intent |
+| `cut`, `cauterise`, `reword`, `reparent`, `link`, `unlink`, `show` `<slug>` | every head of the HEAD tree, in pre-order | state glyph (§5) and the first line of the question |
+| `reopen <slug>` | answered heads only | as above |
+| `sprout --parent`, `reparent --parent`, `link`/`unlink --blocked-by` | every head | as above |
+| `cauterise --by` | answered heads only | as above |
+| `sprout --blocked-by` | every head | as above |
+| `init [<slug>]` | none | |
+
+Only two positions are narrowed by state, and both because an invariant refuses the rest: §4.6 for `reopen`, §4.7 for `cauterise --by`. Everywhere else an answered head is offered like any other — cutting one is a legal overwrite that files the old answer in `prior` (§2), and completion is not the place to start saying which head *should* be addressed (§5).
+
+Candidates carry the head's state glyph rather than being filtered by it. The user reading the list gets what a filter would have told them, and keeps the heads a filter would have hidden.
+
+Pre-order, not alphabetical: it is the order `tree`, `resume` and `next` already use, and a slug's neighbours in the list are then its neighbours in the interview.
+
+`sprout --blocked-by` takes a comma-separated list. The element under the cursor completes like a bare slug and the elements before it are left as typed. They are not withheld from the candidates: the list is split before the candidate set is asked for one, so the rest of it is not visible from there. Naming a slug twice is a no-op — `blocked_by` is a set (§3).
+
+Completion reads the store and never locks or writes it. Every failure — no `.hydra/`, no `HEAD`, an unreadable tree, one written by a newer hydra — yields an empty candidate list and no message. A completer that writes a diagnostic writes it into the line the user is editing.
+
 ---
 
 ## 6. Plugin
@@ -324,6 +355,8 @@ Unit tests on the core lib: graph operations, the invariant set in §4, cascade 
 
 The CLI and its output shapes are not covered. Known consequence: renaming a JSON key won't fail a test, and the skill is the only thing that notices.
 
+Completion is CLI-side and shares that exclusion. The smoke script drives it through the same protocol the shell uses — `COMPLETE=<shell> hydra -- hydra <words>` with the cursor index in the environment — so a candidate set that stops matching the store fails there rather than silently in someone's terminal.
+
 ---
 
 ## 9. Dependencies
@@ -347,7 +380,10 @@ Versions are resolved at `cargo add` time, not pinned here.
 | Crate | Why |
 | --- | --- |
 | `clap` (derive) | Verb surface in §5 |
+| `clap_complete` | Completion (§5). `unstable-dynamic` for `CompleteEnv` and the candidate extensions; needs `unstable-ext` on `clap` for `Arg::add` |
 | `anyhow` | Top-level error reporting; core lib keeps `thiserror` |
+
+Both completion features are unstable and may change shape on a minor upgrade. `Cargo.lock` pins them, and the failure mode is a build error rather than a wrong tree, so the cost of taking them is bounded. The alternative — hand-written bash and zsh scripts — is four shells of duplicated verb surface that drifts from §5 the first time a flag is added.
 
 ### Dev
 

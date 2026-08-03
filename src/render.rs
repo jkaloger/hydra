@@ -5,7 +5,7 @@ use crate::model::Tree;
 use crate::query::{self, State, Visit};
 
 /// §5's legend: `●` answered · `○` ready · `◌` blocked · `⊘` cauterised.
-fn glyph(state: State) -> char {
+pub fn glyph(state: State) -> char {
     match state {
         State::Answered => '●',
         State::Ready => '○',

@@ -11,10 +11,13 @@ use std::path::Path;
 use anyhow::Context;
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::engine::ArgValueCandidates;
 use serde::Serialize;
 
 use hydra::model::Tree;
 use hydra::{Cauterise, Counts, Cut, Sprout, Store, graph, query, render, slug, store};
+
+mod complete;
 
 /// Exit codes. §5 gives `status` a nonzero-while-open contract and §4 gives every
 /// invariant rejection a nonzero exit, so a caller has to be able to tell those
@@ -91,6 +94,7 @@ enum Command {
     /// Move HEAD to an existing tree.
     Use {
         /// The tree to make active.
+        #[arg(add = ArgValueCandidates::new(complete::trees))]
         slug: String,
     },
 
@@ -106,10 +110,15 @@ enum Command {
         #[arg(long, value_name = "TEXT|-")]
         question: String,
         /// Parent head. Omit for a root.
-        #[arg(long, value_name = "SLUG")]
+        #[arg(long, value_name = "SLUG", add = ArgValueCandidates::new(complete::heads))]
         parent: Option<String>,
         /// Heads that gate this one, comma-separated or repeated.
-        #[arg(long = "blocked-by", value_delimiter = ',', value_name = "SLUG,...")]
+        #[arg(
+            long = "blocked-by",
+            value_delimiter = ',',
+            value_name = "SLUG,...",
+            add = ArgValueCandidates::new(complete::heads)
+        )]
         blocked_by: Vec<String>,
         /// Slug to file it under. Defaults to a slug derived from the question.
         #[arg(long, value_name = "SLUG")]
@@ -120,6 +129,7 @@ enum Command {
     /// gates.
     Cut {
         /// The head to answer.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
         /// The answer, decision first. `-` reads stdin.
         #[arg(long, value_name = "TEXT|-")]
@@ -144,9 +154,10 @@ enum Command {
     #[command(visible_alias = "sear")]
     Cauterise {
         /// The head to kill.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
         /// The answered head whose answer killed this question.
-        #[arg(long, value_name = "SLUG")]
+        #[arg(long, value_name = "SLUG", add = ArgValueCandidates::new(complete::answered_heads))]
         by: String,
         /// Why it is moot; lands in `answer.rationale`. `-` reads stdin.
         #[arg(long, value_name = "TEXT|-")]
@@ -160,12 +171,14 @@ enum Command {
     /// answer is kept as `prior`.
     Reopen {
         /// The answered head to put back on the frontier.
+        #[arg(add = ArgValueCandidates::new(complete::answered_heads))]
         slug: String,
     },
 
     /// Change a head's question, leaving its answer alone.
     Reword {
         /// The head to reword.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
         /// The new question. `-` reads stdin.
         #[arg(long, value_name = "TEXT|-")]
@@ -175,18 +188,20 @@ enum Command {
     /// Move a head under a different parent.
     Reparent {
         /// The head to move.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
         /// The new parent. Pass '' to make the head a root.
-        #[arg(long, value_name = "SLUG")]
+        #[arg(long, value_name = "SLUG", add = ArgValueCandidates::new(complete::heads))]
         parent: String,
     },
 
     /// Add a `blocked_by` edge. Idempotent.
     Link {
         /// The head to gate.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
         /// The head that must be answered first.
-        #[arg(long = "blocked-by", value_name = "SLUG")]
+        #[arg(long = "blocked-by", value_name = "SLUG", add = ArgValueCandidates::new(complete::heads))]
         blocked_by: String,
         /// Add an edge that closes a cycle. Records nothing.
         #[arg(long)]
@@ -196,9 +211,10 @@ enum Command {
     /// Remove a `blocked_by` edge. Idempotent.
     Unlink {
         /// The gated head.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
         /// The edge to drop.
-        #[arg(long = "blocked-by", value_name = "SLUG")]
+        #[arg(long = "blocked-by", value_name = "SLUG", add = ArgValueCandidates::new(complete::heads))]
         blocked_by: String,
     },
 
@@ -213,6 +229,7 @@ enum Command {
     /// One head, fully hydrated.
     Show {
         /// The head to hydrate.
+        #[arg(add = ArgValueCandidates::new(complete::heads))]
         slug: String,
     },
 
@@ -225,6 +242,11 @@ enum Command {
 }
 
 fn main() {
+    // Before anything else can reach stdout: with COMPLETE set this call writes
+    // the candidates or the registration script and exits, and without it the
+    // call returns having done nothing (§5).
+    clap_complete::CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
     let code = match run(cli.command) {
         Ok(code) => code,

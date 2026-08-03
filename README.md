@@ -206,12 +206,36 @@ collapse the case in which both names are the same. The skill invokes the `hydra
 binary. If the binary is absent, the skill reports this and conducts the
 interview in context.
 
+### Completion
+
+`COMPLETE=<shell> hydra` writes the shell code that registers hydra as its own
+completer. There is no `completions` subcommand, and no invocation without
+`COMPLETE` set is affected.
+
+```sh
+echo 'source <(COMPLETE=bash hydra)' >> ~/.bashrc
+echo 'source <(COMPLETE=zsh hydra)' >> ~/.zshrc
+echo 'COMPLETE=fish hydra | source' >> ~/.config/fish/completions/hydra.fish
+```
+
+Elvish and PowerShell are supported on the same pattern. The registered code
+calls the binary on each completion, and the interface between the two is not
+stable across versions, so the code is generated at shell start rather than
+written to a file.
+
+Slugs are completed from the store. `use` takes the trees, described by the
+first line of each intent. Every other slug argument takes the heads of the
+`HEAD` tree in pre-order, described by the state glyph and the first line of the
+question. `reopen` and `cauterise --by` take answered heads; the other positions
+take every head. If there is no store, no `HEAD`, or the tree cannot be read,
+no candidates are produced and no message is written.
+
 ## Development
 
 ```sh
 cargo test              # core lib: graph, invariants, cascade
 cargo clippy --all-targets
-scripts/smoke.sh        # the CLI's output shapes and the plugin's files
+scripts/smoke.sh        # the CLI's output shapes, its completions, the plugin's files
 ```
 
 ## See also

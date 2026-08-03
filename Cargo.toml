@@ -6,7 +6,11 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.104"
-clap = { version = "4.6.4", features = ["derive"] }
+clap = { version = "4.6.4", features = ["derive", "unstable-ext"] }
+# Both features are unstable (SPEC §9): `unstable-dynamic` is the completion
+# engine, `unstable-ext` on clap is the `Arg::add` that hangs a candidate set off
+# an arg. Pinned by Cargo.lock; a shape change surfaces as a build error.
+clap_complete = { version = "4.6.8", features = ["unstable-dynamic"] }
 fs4 = "1.1.0"
 jiff = { version = "0.2.35", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
