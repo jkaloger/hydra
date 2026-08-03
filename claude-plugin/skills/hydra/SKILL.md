@@ -34,9 +34,6 @@ Orient from `resume` **every time this skill fires**, including when you wake
 mid-interview. Nothing outside this skill reloads the tree for you: the state is
 on disk, and reading it is one command.
 
-If `command -v hydra` fails, say so in one line and **interview in context
-instead** — same loop, same discipline, tracked in your own notes. Do not stop.
-
 `hydra resume` exits **5** when there is no tree to interview. Then:
 
 ```bash
@@ -49,7 +46,7 @@ hydra resume          # and orient
 ```
 
 `--intent` is **required** and is the one thing you cannot reconstruct later:
-write what this interview is *for*, in a sentence or two of prose, from the
+write what this interview is _for_, in a sentence or two of prose, from the
 user's brief. It is the first field `resume` hands back, so every future session
 — including yours after a reset — reads the tree against it instead of guessing
 purpose from the question list. Blank is refused (exit 2). Do not paraphrase the
@@ -118,7 +115,7 @@ layout was too thin, not the answer unusually generative.
 
 Every question turn has the same four parts, in this order:
 
-1. **The tree** — `hydra tree`, verbatim, in a fenced block. Every turn, no
+1. **The tree** — `hydra tree`, relevant context, in a fenced block. Every turn, no
    exceptions. It is how the user sees where they are, and it costs a few lines.
 2. **2-4 real options** — distinct, non-strawman, each with the tradeoff that
    actually decides between them.
