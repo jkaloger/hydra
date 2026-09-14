@@ -1,0 +1,34 @@
+{
+  "name": "hydra",
+  "version": "0.1.1+codex.20260914021246",
+  "description": "AI-led design interviews over a durable decision tree.",
+  "author": {
+    "name": "Jack Kaloger",
+    "url": "https://github.com/jkaloger"
+  },
+  "homepage": "https://github.com/jkaloger/hydra",
+  "repository": "https://github.com/jkaloger/hydra",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "design",
+    "interview",
+    "planning",
+    "decision-tree",
+    "spec-driven"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hydra",
+    "shortDescription": "Durable, AI-led design interviews.",
+    "longDescription": "Guide a design interview through a durable decision tree stored in the project.",
+    "developerName": "Jack Kaloger",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Interview me to decide this system's design."
+    ]
+  }
+}

@@ -182,8 +182,11 @@ jq -r '.heads | to_entries[] | select(.value.status == "open") | .key' .hydra/my
 cargo install --path .
 ```
 
-The Claude Code plugin is optional. Hydra is invoked from a shell, a Makefile, or
-an agent.
+Hydra is invoked from a shell, a Makefile, or an agent. Its interview skill has
+one source, [`skills/hydra/SKILL.md`](skills/hydra/SKILL.md); the Claude Code
+and Codex plugin entries are symlinks to it.
+
+### Claude Code
 
 ```sh
 claude --plugin-dir ./claude-plugin      # this session only
@@ -205,6 +208,19 @@ protocol. Claude Code addresses a plugin's skills as `plugin:skill`, and does no
 collapse the case in which both names are the same. The skill invokes the `hydra`
 binary. If the binary is absent, the skill reports this and conducts the
 interview in context.
+
+### Codex
+
+The repository is a local Codex marketplace named `hydra`. Register the
+repository root, then install its plugin:
+
+```sh
+codex plugin marketplace add /absolute/path/to/hydra
+codex plugin add hydra@hydra
+```
+
+The marketplace manifest is at `.agents/plugins/marketplace.json`, and the
+plugin manifest is at `plugins/hydra/.codex-plugin/plugin.json`.
 
 ### Completion
 

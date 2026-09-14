@@ -1,0 +1,1 @@
+../../../../skills/hydra/SKILL.md
